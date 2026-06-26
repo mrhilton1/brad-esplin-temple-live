@@ -1,0 +1,6 @@
+{
+  "name": "PDF Column Extractor",
+  "description": "Upload any PDF document to extract tabular columns and clean data, ignoring headers, footers, and other page noise, then export as a pristine new PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
