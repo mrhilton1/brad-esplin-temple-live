@@ -18,3 +18,20 @@ View your app in AI Studio: https://ai.studio/apps/8ef658e2-3df5-4eae-a9ef-66cc2
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Deploy on Cloudflare Workers
+
+This repo uses Cloudflare Workers with static assets for the Vite app and a Worker entrypoint for the backend API routes.
+
+Use these Workers build settings:
+
+- Build command: `npm run build`
+- Deploy command: `npx wrangler deploy` or `npx wrangler versions upload`
+- Root directory: `/`
+- Node version: `22`
+
+Add this Cloudflare Worker secret:
+
+- `GEMINI_API_KEY`: your Gemini API key
+
+The frontend calls `/api/extract` and `/api/validate-phone` on the same Worker domain, so no separate backend URL is required.
