@@ -67,6 +67,27 @@ const compareEventsByDateTime = (a: EventRecord, b: EventRecord): number => {
   return (a.guests || a.id || "").localeCompare(b.guests || b.id || "");
 };
 
+const eventNeedsLsg = (event: EventRecord): boolean => {
+  return !!(
+    !event.completed &&
+    event.status !== "deleted" &&
+    event.status !== "changed" &&
+    event.assignedCsgId &&
+    (!event.assignedLsgId || !event.assignedGroomLsgId)
+  );
+};
+
+const eventNeedsCsg = (event: EventRecord): boolean => {
+  return !!(
+    !event.completed &&
+    event.status !== "deleted" &&
+    event.status !== "changed" &&
+    event.assignedLsgId &&
+    event.assignedGroomLsgId &&
+    !event.assignedCsgId
+  );
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -1035,6 +1056,8 @@ export default function EventMatcher() {
     { id: "past", label: "Past (History)" },
     { id: "assigned", label: "🟢 Covered (Confirmed)" },
     { id: "awaiting_confirmation", label: "🟡 Awaiting Confirmation" },
+    { id: "lsg_needed", label: "🟡 LSG Needed" },
+    { id: "csg_needed", label: "🟡 CSG Needed" },
     { id: "unassigned", label: "🟡 Pending Assignments" },
     { id: "completed", label: "✓ Completed & Logged" },
     { id: "changed", label: "🟡 Changed" },
@@ -1093,6 +1116,10 @@ export default function EventMatcher() {
       matchesStatus = !!(e.assignedLsgId && e.assignedGroomLsgId && e.assignedCsgId && e.lsgConfirmed && e.groomLsgConfirmed && e.csgConfirmed && !e.completed && e.status !== "deleted");
     } else if (statusFilter === "awaiting_confirmation") {
       matchesStatus = !!(e.assignedLsgId && e.assignedGroomLsgId && e.assignedCsgId && !(e.lsgConfirmed && e.groomLsgConfirmed && e.csgConfirmed) && !e.completed && e.status !== "deleted");
+    } else if (statusFilter === "lsg_needed") {
+      matchesStatus = eventNeedsLsg(e);
+    } else if (statusFilter === "csg_needed") {
+      matchesStatus = eventNeedsCsg(e);
     } else if (statusFilter === "unassigned") {
       matchesStatus = !!((!e.assignedLsgId || !e.assignedGroomLsgId || !e.assignedCsgId) && !e.completed && e.status !== "deleted");
     } else if (statusFilter === "completed") {
@@ -1445,7 +1472,7 @@ export default function EventMatcher() {
                   <span>HISTORICAL RECORD</span>
                 </div>
               );
-            } else if (event.assignedCsgId && (!event.assignedLsgId || !event.assignedGroomLsgId)) {
+            } else if (eventNeedsLsg(event)) {
               // We have CSG Worker but are missing one or both LSGs
               borderClass = "border-amber-500/30 bg-amber-500/3";
               statusBadge = (
@@ -1454,7 +1481,7 @@ export default function EventMatcher() {
                   <span>LSG NEEDED</span>
                 </div>
               );
-            } else if (event.assignedLsgId && event.assignedGroomLsgId && !event.assignedCsgId) {
+            } else if (eventNeedsCsg(event)) {
               // We have both LSGs but are missing CSG Worker
               borderClass = "border-amber-500/30 bg-amber-500/3";
               statusBadge = (
