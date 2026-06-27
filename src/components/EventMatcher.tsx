@@ -38,6 +38,35 @@ const parseDateString = (dateStr: string): Date | null => {
   return null;
 };
 
+const parseEventTimeMinutes = (timeStr: string): number => {
+  const match = String(timeStr || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const period = match[3].toUpperCase();
+
+  if (period === "PM" && hours < 12) {
+    hours += 12;
+  } else if (period === "AM" && hours === 12) {
+    hours = 0;
+  }
+
+  return hours * 60 + minutes;
+};
+
+const compareEventsByDateTime = (a: EventRecord, b: EventRecord): number => {
+  const dateA = parseDateString(a.date)?.getTime() || 0;
+  const dateB = parseDateString(b.date)?.getTime() || 0;
+  if (dateA !== dateB) return dateA - dateB;
+
+  const timeA = parseEventTimeMinutes(a.time);
+  const timeB = parseEventTimeMinutes(b.time);
+  if (timeA !== timeB) return timeA - timeB;
+
+  return (a.guests || a.id || "").localeCompare(b.guests || b.id || "");
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -266,6 +295,7 @@ export default function EventMatcher() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRangeStart, setDateRangeStart] = useState<Date | null>(null);
   const [dateRangeEnd, setDateRangeEnd] = useState<Date | null>(null);
+  const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>(null);
   const [expandedEventIds, setExpandedEventIds] = useState<Record<string, boolean>>({});
   const [syncStatus, setSyncStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSyncingStats, setIsSyncingStats] = useState(false);
@@ -535,7 +565,7 @@ export default function EventMatcher() {
   // Clear session edits when filter changes so the user can re-filter freshly
   useEffect(() => {
     setSessionEditedIds(new Set());
-  }, [statusFilter, dateRangeStart, dateRangeEnd, searchTerm]);
+  }, [statusFilter, dateRangeStart, dateRangeEnd, dateQuickFilter, searchTerm]);
 
   // Load events and contacts from Supabase
   const loadData = async () => {
@@ -548,13 +578,7 @@ export default function EventMatcher() {
         eventsList.push({ id: docSnap.id, ...docSnap.data() } as EventRecord);
       });
       
-      // Sort events by date and time
-      eventsList.sort((a, b) => {
-        const dateA = parseDateString(a.date)?.getTime() || 0;
-        const dateB = parseDateString(b.date)?.getTime() || 0;
-        if (dateA !== dateB) return dateA - dateB;
-        return (a.time || "").localeCompare(b.time || "");
-      });
+      eventsList.sort(compareEventsByDateTime);
       setEvents(eventsList);
 
       // Load Contacts
@@ -994,6 +1018,14 @@ export default function EventMatcher() {
   const handleClearDateFilter = () => {
     setDateRangeStart(null);
     setDateRangeEnd(null);
+    setDateQuickFilter(null);
+    setShowDatePicker(false);
+  };
+
+  const handleWeekendDateFilter = () => {
+    setDateRangeStart(null);
+    setDateRangeEnd(null);
+    setDateQuickFilter("weekends");
     setShowDatePicker(false);
   };
 
@@ -1025,6 +1057,13 @@ export default function EventMatcher() {
 
     // Date Filter match (handles both single date and date range)
     const matchesDate = (() => {
+      if (dateQuickFilter === "weekends") {
+        const parsedEventDate = parseDateString(e.date);
+        if (!parsedEventDate) return false;
+        const day = parsedEventDate.getDay();
+        return day === 5 || day === 6;
+      }
+
       if (!dateRangeStart) return true;
       const parsedEventDate = parseDateString(e.date);
       if (!parsedEventDate) return false;
@@ -1070,7 +1109,7 @@ export default function EventMatcher() {
     }
 
     return matchesSearch && matchesDate && matchesStatus;
-  });
+  }).sort(compareEventsByDateTime);
 
   return (
     <div className="w-full">
@@ -1117,14 +1156,16 @@ export default function EventMatcher() {
                 setShowStatusDropdown(false);
               }}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all shadow-sm cursor-pointer select-none ${
-                dateRangeStart
+                dateRangeStart || dateQuickFilter
                   ? "bg-indigo-600 text-white border-indigo-500"
                   : "bg-white/5 hover:bg-white/10 text-slate-200 border-white/10"
               }`}
             >
               <Calendar className="w-4 h-4" />
               <span>
-                {dateRangeStart ? (
+                {dateQuickFilter === "weekends" ? (
+                  "Weekends"
+                ) : dateRangeStart ? (
                   dateRangeEnd ? (
                     `${formatDateFriendly(dateRangeStart)} - ${formatDateFriendly(dateRangeEnd)}`
                   ) : (
@@ -1163,6 +1204,18 @@ export default function EventMatcher() {
                     </button>
                   </div>
 
+                  <button
+                    type="button"
+                    onClick={handleWeekendDateFilter}
+                    className={`w-full px-3 py-2 rounded-lg border text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      dateQuickFilter === "weekends"
+                        ? "bg-indigo-600 text-white border-indigo-500"
+                        : "bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border-indigo-500/20"
+                    }`}
+                  >
+                    Weekends: Friday + Saturday
+                  </button>
+
                   {/* Days of Week Row */}
                   <div className="grid grid-cols-7 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest font-mono">
                     {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map(day => (
@@ -1182,6 +1235,7 @@ export default function EventMatcher() {
                       // Precise day-level checks
                       const isSelectedStart = dateRangeStart && day.toDateString() === dateRangeStart.toDateString();
                       const isSelectedEnd = dateRangeEnd && day.toDateString() === dateRangeEnd.toDateString();
+                      const isWeekendQuickDay = dateQuickFilter === "weekends" && (day.getDay() === 5 || day.getDay() === 6);
                       
                       // For comparing times at 00:00:00 to avoid hours offset issue
                       const dayTime = new Date(day);
@@ -1196,6 +1250,7 @@ export default function EventMatcher() {
 
                       // Click Handler
                       const handleDayClick = () => {
+                        setDateQuickFilter(null);
                         if (!dateRangeStart || (dateRangeStart && dateRangeEnd)) {
                           setDateRangeStart(day);
                           setDateRangeEnd(null);
@@ -1218,6 +1273,8 @@ export default function EventMatcher() {
                           className={`py-1.5 text-center font-bold text-[11px] transition-all relative cursor-pointer ${
                             isSelected
                               ? "bg-indigo-600 text-white rounded-lg z-10 shadow-md scale-105"
+                              : isWeekendQuickDay
+                              ? "bg-indigo-500/25 text-indigo-100 border border-indigo-500/35 rounded-lg"
                               : isInRange
                               ? "bg-indigo-500/25 text-indigo-200 rounded-none font-black"
                               : hasEvent
