@@ -57,6 +57,14 @@ export default {
       return handleValidatePhone(url);
     }
 
+    if (url.pathname === "/api/conflicts/apply-all") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      return handleApplyAllConflicts(env);
+    }
+
     if (url.pathname.startsWith("/api/db/")) {
       return handleDatabaseRequest(request, env, url);
     }
@@ -239,8 +247,81 @@ async function handleDatabaseRequest(request: Request, env: Env, url: URL): Prom
   }
 }
 
+async function handleApplyAllConflicts(env: Env): Promise<Response> {
+  try {
+    const pendingRows = await supabaseRequest(
+      env,
+      collections.crm_sync_conflicts.table,
+      "?status=eq.pending&select=*",
+    );
+
+    const pendingConflicts = pendingRows.map(conflictFromRow);
+    const now = new Date().toISOString();
+    const presenceConflicts = pendingConflicts.filter((conflict: any) => conflict.field === "Presence");
+    const fieldConflicts = pendingConflicts.filter((conflict: any) => conflict.field !== "Presence");
+
+    const contactIdsToDelete = uniqueValues(presenceConflicts.map((conflict: any) => conflict.contactId));
+    for (const chunk of chunks(contactIdsToDelete, 100)) {
+      await supabaseDeleteMany(env, collections.crm_contacts.table, chunk);
+    }
+
+    const contactIdsToUpdate = uniqueValues(fieldConflicts.map((conflict: any) => conflict.contactId));
+    const existingContactRows: any[] = [];
+    for (const chunk of chunks(contactIdsToUpdate, 100)) {
+      existingContactRows.push(...await supabaseRowsByIds(env, collections.crm_contacts.table, chunk));
+    }
+
+    const contactsById = new Map<string, Record<string, any>>();
+    for (const row of existingContactRows) {
+      contactsById.set(row.id, contactFromRow(row));
+    }
+
+    for (const conflict of fieldConflicts as any[]) {
+      const currentContact = contactsById.get(conflict.contactId) || {
+        id: conflict.contactId,
+        "Worker Name": conflict.workerName || conflict.contactId,
+      };
+      contactsById.set(conflict.contactId, {
+        ...currentContact,
+        [conflict.field]: conflict.incomingValue,
+        updatedAt: now,
+      });
+    }
+
+    const contactRowsToUpsert = Array.from(contactsById.entries()).map(([id, contact]) => contactToRow(contact, id));
+    for (const chunk of chunks(contactRowsToUpsert, 100)) {
+      await supabaseUpsertMany(env, collections.crm_contacts.table, chunk);
+    }
+
+    const conflictIds: string[] = pendingConflicts.map((conflict: any) => String(conflict.id || "")).filter(Boolean);
+    for (const chunk of chunks(conflictIds, 100)) {
+      await supabasePatchMany(env, collections.crm_sync_conflicts.table, chunk, {
+        status: "applied",
+        updated_at: now,
+      });
+    }
+
+    return json({
+      ok: true,
+      applied: pendingConflicts.length,
+      contactsUpdated: contactRowsToUpsert.length,
+      contactsDeleted: contactIdsToDelete.length,
+    });
+  } catch (error: any) {
+    return json({ error: error?.message || "Failed to apply all pending conflicts." }, 500);
+  }
+}
+
 async function supabaseRows(env: Env, table: string): Promise<any[]> {
   return supabaseRequest(env, table, "?select=*");
+}
+
+async function supabaseRowsByIds(env: Env, table: string, ids: string[]): Promise<any[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return supabaseRequest(env, table, `?id=in.(${ids.map(encodePostgrestValue).join(",")})&select=*`);
 }
 
 async function supabaseRow(env: Env, table: string, id: string): Promise<any | null> {
@@ -259,12 +340,53 @@ async function supabaseUpsert(env: Env, table: string, row: Record<string, any>)
   return rows[0] || row;
 }
 
+async function supabaseUpsertMany(env: Env, table: string, rows: Record<string, any>[]): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  await supabaseRequest(env, table, "?on_conflict=id", {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify(rows),
+  });
+}
+
 async function supabaseDelete(env: Env, table: string, id: string): Promise<void> {
   await supabaseRequest(env, table, `?id=eq.${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: {
       Prefer: "return=minimal",
     },
+  });
+}
+
+async function supabaseDeleteMany(env: Env, table: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+
+  await supabaseRequest(env, table, `?id=in.(${ids.map(encodePostgrestValue).join(",")})`, {
+    method: "DELETE",
+    headers: {
+      Prefer: "return=minimal",
+    },
+  });
+}
+
+async function supabasePatchMany(env: Env, table: string, ids: string[], data: Record<string, any>): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+
+  await supabaseRequest(env, table, `?id=in.(${ids.map(encodePostgrestValue).join(",")})`, {
+    method: "PATCH",
+    headers: {
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(data),
   });
 }
 
@@ -503,6 +625,22 @@ function parseInteger(value: unknown): number {
 function nullableText(value: unknown): string | null {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < values.length; i += size) {
+    result.push(values.slice(i, i + size));
+  }
+  return result;
+}
+
+function uniqueValues(values: unknown[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function encodePostgrestValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function handleValidatePhone(url: URL): Response {

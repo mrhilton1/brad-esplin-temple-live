@@ -3,7 +3,7 @@ import {
   Search, Trash2, Plus, RefreshCw, Sliders, Database, 
   MessageSquare, Phone, Mail, User, ShieldAlert, Check, X,
   PlusCircle, Edit3, Star, Tag, CheckCircle, Info, Home, Calendar,
-  Filter, ChevronDown, Save, Copy
+  Filter, ChevronDown, Save, Copy, CheckCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -432,6 +432,8 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [conflictsLoading, setConflictsLoading] = useState(false);
+  const [bulkResolving, setBulkResolving] = useState(false);
+  const [bulkResolveMessage, setBulkResolveMessage] = useState<string | null>(null);
 
   // Core clean dynamic columns list
   const [columns, setColumns] = useState<string[]>([
@@ -659,6 +661,45 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     }
   };
 
+  const handleApplyAllPendingConflicts = async () => {
+    const pending = conflicts.filter(c => c.status === "pending");
+    if (pending.length === 0 || bulkResolving) return;
+
+    const presenceCount = pending.filter(c => c.field === "Presence").length;
+    const confirmMessage = presenceCount > 0
+      ? `Apply all ${pending.length} pending decisions? This includes ${presenceCount} volunteer status decision${presenceCount === 1 ? "" : "s"} that will delete contacts marked missing from the uploaded worker list.`
+      : `Apply all ${pending.length} pending decisions and overwrite those CRM fields with the incoming PDF values?`;
+
+    if (!confirm(confirmMessage)) return;
+
+    setBulkResolving(true);
+    setBulkResolveMessage(null);
+    try {
+      const response = await fetch("/api/conflicts/apply-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to apply all pending decisions.");
+      }
+
+      setBulkResolveMessage(
+        `Applied ${result.applied} decisions. Updated ${result.contactsUpdated} contacts${result.contactsDeleted ? ` and deleted ${result.contactsDeleted}` : ""}.`
+      );
+      await fetchContacts();
+      await fetchConflicts();
+    } catch (err: any) {
+      console.error("Error applying all conflicts:", err);
+      setBulkResolveMessage(err.message || "Failed to apply all pending decisions.");
+      alert(err.message || "Failed to apply all pending decisions.");
+    } finally {
+      setBulkResolving(false);
+    }
+  };
+
   const clearResolvedLogs = async () => {
     if (!confirm("Are you sure you want to clear all resolved conflict logs?")) return;
     try {
@@ -873,6 +914,8 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
     return matchesSearch && matchesTag;
   });
+  const pendingConflicts = conflicts.filter(c => c.status === "pending");
+  const resolvedConflicts = conflicts.filter(c => c.status !== "pending");
 
   // Check if a cell is being edited
   const isEditing = (contactId: string, field: string) => {
@@ -1765,17 +1808,38 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
             {/* Pending Decisions Section */}
             <div className="space-y-4">
-              <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                Pending Decisions ({conflicts.filter(c => c.status === "pending").length})
-              </h4>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    Pending Decisions ({pendingConflicts.length})
+                  </h4>
+                  {bulkResolveMessage && (
+                    <p className="text-xs text-slate-400 mt-1">{bulkResolveMessage}</p>
+                  )}
+                </div>
+                {pendingConflicts.length > 0 && (
+                  <button
+                    onClick={handleApplyAllPendingConflicts}
+                    disabled={bulkResolving}
+                    className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/50 disabled:text-emerald-200/60 border border-emerald-400/20 rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed shadow-sm uppercase tracking-wider"
+                  >
+                    {bulkResolving ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCheck className="w-3.5 h-3.5" />
+                    )}
+                    {bulkResolving ? "Applying..." : "Accept All Pending"}
+                  </button>
+                )}
+              </div>
 
               {conflictsLoading ? (
                 <div className="text-center py-12 text-slate-500 text-sm">
                   <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-400" />
                   Loading sync logs...
                 </div>
-              ) : conflicts.filter(c => c.status === "pending").length === 0 ? (
+              ) : pendingConflicts.length === 0 ? (
                 <div className="p-10 text-center bg-white/5 border border-white/5 rounded-xl text-slate-400 space-y-1">
                   <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2 animate-bounce" />
                   <p className="font-bold text-sm text-slate-300">All caught up!</p>
@@ -1783,7 +1847,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
-                  {conflicts.filter(c => c.status === "pending").map((conflict) => (
+                  {pendingConflicts.map((conflict) => (
                     <div 
                       key={conflict.id}
                       className="p-5 bg-white/5 border border-white/10 rounded-xl space-y-4 hover:border-white/20 transition-all shadow-md relative overflow-hidden"
@@ -1845,21 +1909,24 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         <div className="flex gap-2 self-end sm:self-center shrink-0">
                           <button
                             onClick={() => handleResolveConflict(conflict, "yes")}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1 shadow-xs"
+                            disabled={bulkResolving}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/50 disabled:text-emerald-200/60 text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 shadow-xs"
                           >
                             <Check className="w-3.5 h-3.5" />
                             Yes, Apply
                           </button>
                           <button
                             onClick={() => handleResolveConflict(conflict, "no")}
-                            className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1 border border-white/10"
+                            disabled={bulkResolving}
+                            className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 disabled:bg-white/5 disabled:text-slate-500 text-slate-300 hover:text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 border border-white/10"
                           >
                             <X className="w-3.5 h-3.5" />
                             No, Skip
                           </button>
                           <button
                             onClick={() => handleResolveConflict(conflict, "never")}
-                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 hover:text-red-200 text-xs font-bold rounded-lg cursor-pointer transition-all border border-red-500/25"
+                            disabled={bulkResolving}
+                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 disabled:bg-red-500/5 disabled:text-red-300/50 text-red-300 hover:text-red-200 text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all border border-red-500/25"
                             title="Never prompt or overwrite this field or contact again"
                           >
                             NEVER OVERWRITE
@@ -1875,13 +1942,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
             {/* Resolved History / Decisions Logs Section */}
             <div className="space-y-3 pt-4 border-t border-white/5">
               <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">
-                Decision History & Auto-Applied Activity Log ({conflicts.filter(c => c.status !== "pending").length})
+                Decision History & Auto-Applied Activity Log ({resolvedConflicts.length})
               </h4>
-              {conflicts.filter(c => c.status !== "pending").length === 0 ? (
+              {resolvedConflicts.length === 0 ? (
                 <p className="text-xs text-slate-500 italic">No historical changes logged yet in this session.</p>
               ) : (
                 <div className="max-h-64 overflow-y-auto divide-y divide-white/5 border border-white/5 rounded-lg bg-black/15 text-xs">
-                  {conflicts.filter(c => c.status !== "pending").map((log) => (
+                  {resolvedConflicts.map((log) => (
                     <div key={log.id} className="p-3 flex justify-between items-center gap-4 hover:bg-white/5">
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
