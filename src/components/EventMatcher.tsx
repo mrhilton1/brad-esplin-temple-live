@@ -316,7 +316,7 @@ export default function EventMatcher() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRangeStart, setDateRangeStart] = useState<Date | null>(null);
   const [dateRangeEnd, setDateRangeEnd] = useState<Date | null>(null);
-  const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>(null);
+  const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>("weekends");
   const [expandedEventIds, setExpandedEventIds] = useState<Record<string, boolean>>({});
   const [syncStatus, setSyncStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSyncingStats, setIsSyncingStats] = useState(false);
