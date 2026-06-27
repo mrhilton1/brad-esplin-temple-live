@@ -6,11 +6,9 @@ import {
   Filter, ChevronDown, Save, Copy
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  collection, getDocs, doc, setDoc, deleteDoc, updateDoc, 
-  serverTimestamp, onSnapshot
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
+import {
+  collection, db, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc,
+} from "../lib/dataStore";
 
 interface ContactRecord {
   id: string;
@@ -574,7 +572,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       setContacts(records);
       setColumns(Array.from(foundFields));
     } catch (err: any) {
-      console.error("Error fetching contacts from Firestore:", err);
+      console.error("Error fetching contacts from Supabase:", err);
       setError("Failed to fetch CRM contacts. Ensure you have network connectivity and Firebase is properly configured.");
     } finally {
       setLoading(false);
@@ -690,7 +688,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         setTemplates(list);
       },
       (err) => {
-        console.error("Firestore templates listener error:", err);
+        console.error("Supabase templates listener error:", err);
       }
     );
 
@@ -739,7 +737,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     }
   };
 
-  // Update a specific cell in Firestore
+  // Update a specific cell in Supabase
   const updateContactField = async (contactId: string, field: string, value: string) => {
     try {
       const contactRef = doc(db, "crm_contacts", contactId);
@@ -1210,7 +1208,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           <ShieldAlert className="w-10 h-10 text-indigo-400 mb-3" />
           <p className="font-semibold text-slate-200">No CRM Contacts Stored</p>
           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-            Analyze a PDF containing workers and click <strong>"Store in CRM Database"</strong>, or clear filters or add a contact manually above to seed the Firestore database!
+            Analyze a PDF containing workers and click <strong>"Store in CRM Database"</strong>, or clear filters or add a contact manually above to seed the Supabase database!
           </p>
         </div>
       ) : (

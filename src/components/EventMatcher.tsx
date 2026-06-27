@@ -6,11 +6,9 @@ import {
   CheckSquare, Square, Filter, MessageSquare, Copy, Edit3, Save
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  collection, getDocs, doc, setDoc, updateDoc, deleteDoc, 
-  serverTimestamp, getDoc
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
+import {
+  collection, db, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc,
+} from "../lib/dataStore";
 
 // Helper to convert dynamic date to YYYY-MM-DD for comparison
 const parseDateString = (dateStr: string): Date | null => {
@@ -341,7 +339,7 @@ export default function EventMatcher() {
     }, 10);
   };
 
-  // Load Templates from Firestore
+  // Load Templates from Supabase
   const loadTemplates = async () => {
     try {
       const templatesSnap = await getDocs(collection(db, "text_templates"));
@@ -539,7 +537,7 @@ export default function EventMatcher() {
     setSessionEditedIds(new Set());
   }, [statusFilter, dateRangeStart, dateRangeEnd, searchTerm]);
 
-  // Load events and contacts from Firestore
+  // Load events and contacts from Supabase
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -596,7 +594,7 @@ export default function EventMatcher() {
     return timeA - timeB;
   });
 
-  // Update event assignment in Firestore
+  // Update event assignment in Supabase
   const handleAssignWorker = async (eventId: string, role: "lsg" | "groom_lsg" | "csg", contactId: string) => {
     try {
       const eventRef = doc(db, "events", eventId);
@@ -655,7 +653,7 @@ export default function EventMatcher() {
     }
   };
 
-  // Toggle confirmation status in Firestore
+  // Toggle confirmation status in Supabase
   const handleToggleConfirm = async (eventId: string, role: "lsg" | "groom_lsg" | "csg", currentValue: boolean) => {
     try {
       const eventRef = doc(db, "events", eventId);

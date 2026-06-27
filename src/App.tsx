@@ -5,17 +5,17 @@ import {
   ShieldAlert
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { db } from "./lib/firebase";
+import { collection, db, onSnapshot, query, where } from "./lib/dataStore";
 import FileUploader from "./components/FileUploader";
 import TablePreview from "./components/TablePreview";
 import CrmDatabase from "./components/CrmDatabase";
 import EventMatcher from "./components/EventMatcher";
 import { UploadedFile, ExtractedTableData } from "./types";
+import { parsePdfLocally } from "./lib/pdfParser";
 
 const LOADING_STEPS = [
   "Reading PDF binary layout...",
-  "Injesting multimodal pages into Gemini...",
+  "Extracting selectable PDF text locally...",
   "Locating structural column boundaries...",
   "Filtering out document titles & branding headers...",
   "Discarding page numbers, footers & margin noise...",
@@ -43,7 +43,7 @@ export default function App() {
         setContactsCount(snapshot.size);
       },
       (err) => {
-        console.error("Firestore contacts listener error:", err);
+        console.error("Supabase contacts listener error:", err);
       }
     );
 
@@ -58,7 +58,7 @@ export default function App() {
         setPendingConflictsCount(snapshot.size);
       },
       (err) => {
-        console.error("Firestore conflicts listener error:", err);
+        console.error("Supabase conflicts listener error:", err);
       }
     );
 
@@ -104,7 +104,7 @@ export default function App() {
     setSelectedPreset("crm_contacts");
   };
 
-  // Post to Express server
+  // Parse the PDF locally without sending document contents to an AI service.
   const handleExtractData = async () => {
     if (!selectedFile) return;
 
@@ -112,37 +112,21 @@ export default function App() {
     setError(null);
     const intervalId = startLoadingAnimation();
 
-    const instructionToUse = 
-      selectedPreset === "crm_contacts" 
-        ? CRM_INSTRUCTION 
-        : selectedPreset === "worker_history" 
-          ? HISTORY_INSTRUCTION 
-          : EVENT_INSTRUCTION;
-
     try {
-      const response = await fetch("/api/extract", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pdfData: selectedFile.base64,
-          customInstruction: instructionToUse,
-        }),
-      });
+      const result = await parsePdfLocally(selectedFile.base64, selectedPreset);
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to process the PDF document.");
+      if (result.rows.length === 0) {
+        throw new Error(
+          "No table rows were found. This PDF may be scanned/image-only or use a layout that needs a custom parser rule."
+        );
       }
 
       setExtractedData(result);
     } catch (err: any) {
-      console.error("API Error during extraction:", err);
+      console.error("Local PDF extraction error:", err);
       setError(
         err.message || 
-        "Failed to communicate with the extraction server. Make sure your GEMINI_API_KEY is configured in the Secrets panel."
+        "Failed to extract table data from this PDF."
       );
     } finally {
       clearInterval(intervalId);

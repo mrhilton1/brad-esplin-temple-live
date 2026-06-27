@@ -6,6 +6,8 @@ interface Env {
     fetch(request: Request): Promise<Response>;
   };
   GEMINI_API_KEY?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 const jsonHeaders = {
@@ -53,9 +55,48 @@ export default {
       return handleValidatePhone(url);
     }
 
+    if (url.pathname.startsWith("/api/db/")) {
+      return handleDatabaseRequest(request, env, url);
+    }
+
     return env.ASSETS.fetch(request);
   },
 };
+
+const collections = {
+  crm_contacts: {
+    table: "temple_contacts",
+    fromRow: contactFromRow,
+    toRow: contactToRow,
+  },
+  events: {
+    table: "temple_events",
+    fromRow: eventFromRow,
+    toRow: eventToRow,
+  },
+  crm_sync_conflicts: {
+    table: "temple_sync_conflicts",
+    fromRow: conflictFromRow,
+    toRow: conflictToRow,
+  },
+  crm_never_rules: {
+    table: "temple_never_rules",
+    fromRow: neverRuleFromRow,
+    toRow: neverRuleToRow,
+  },
+  text_templates: {
+    table: "temple_text_templates",
+    fromRow: templateFromRow,
+    toRow: templateToRow,
+  },
+  import_batches: {
+    table: "temple_import_batches",
+    fromRow: (row: any) => row,
+    toRow: (data: any, id: string) => ({ id, ...data }),
+  },
+} as const;
+
+type CollectionName = keyof typeof collections;
 
 async function handleExtract(request: Request, env: Env): Promise<Response> {
   try {
@@ -147,6 +188,319 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
       error: error?.message || "An unexpected error occurred during PDF processing.",
     }, 500);
   }
+}
+
+async function handleDatabaseRequest(request: Request, env: Env, url: URL): Promise<Response> {
+  try {
+    const parts = url.pathname.replace(/^\/api\/db\//, "").split("/").filter(Boolean);
+    const collectionName = parts[0] as CollectionName | undefined;
+    const id = parts[1] ? decodeURIComponent(parts[1]) : undefined;
+
+    if (!collectionName || !(collectionName in collections)) {
+      return json({ error: "Unknown collection." }, 404);
+    }
+
+    const config = collections[collectionName];
+
+    if (request.method === "GET" && !id) {
+      const rows = await supabaseRows(env, config.table);
+      const filters = Array.from(url.searchParams.entries());
+      const docs = rows.map(config.fromRow).filter((doc) => {
+        return filters.every(([field, value]) => String(doc[field] ?? "") === value);
+      });
+      return json(docs);
+    }
+
+    if (request.method === "GET" && id) {
+      const row = await supabaseRow(env, config.table, id);
+      return json(row ? config.fromRow(row) : null);
+    }
+
+    if ((request.method === "PUT" || request.method === "PATCH") && id) {
+      const incoming = await request.json() as Record<string, any>;
+      const existingRow = request.method === "PATCH" ? await supabaseRow(env, config.table, id) : null;
+      const existingDoc = existingRow ? config.fromRow(existingRow) : {};
+      const mergedDoc = request.method === "PATCH" ? { ...existingDoc, ...incoming, id } : { ...incoming, id };
+      const row = config.toRow(mergedDoc, id);
+      const saved = await supabaseUpsert(env, config.table, row);
+      return json(config.fromRow(saved));
+    }
+
+    if (request.method === "DELETE" && id) {
+      await supabaseDelete(env, config.table, id);
+      return json({ ok: true });
+    }
+
+    return json({ error: "Method not allowed" }, 405);
+  } catch (error: any) {
+    return json({ error: error?.message || "Database request failed." }, 500);
+  }
+}
+
+async function supabaseRows(env: Env, table: string): Promise<any[]> {
+  return supabaseRequest(env, table, "?select=*");
+}
+
+async function supabaseRow(env: Env, table: string, id: string): Promise<any | null> {
+  const rows = await supabaseRequest(env, table, `?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
+  return rows[0] || null;
+}
+
+async function supabaseUpsert(env: Env, table: string, row: Record<string, any>): Promise<any> {
+  const rows = await supabaseRequest(env, table, "?on_conflict=id", {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=representation",
+    },
+    body: JSON.stringify(row),
+  });
+  return rows[0] || row;
+}
+
+async function supabaseDelete(env: Env, table: string, id: string): Promise<void> {
+  await supabaseRequest(env, table, `?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      Prefer: "return=minimal",
+    },
+  });
+}
+
+async function supabaseRequest(env: Env, table: string, query = "", init: RequestInit = {}): Promise<any> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on Cloudflare Workers.");
+  }
+
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}${query}`, {
+    ...init,
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Supabase ${response.status}: ${text}`);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
+function contactFromRow(row: any): Record<string, any> {
+  return {
+    ...(row.extra || {}),
+    id: row.id,
+    "Worker Name": row.worker_name || "",
+    "Household Phone": row.household_phone || "",
+    "Personal Phone": row.personal_phone || "",
+    Email: row.email || "",
+    Labels: Array.isArray(row.labels) ? row.labels.join(", ") : "",
+    "Preferred Phone Type": row.preferred_phone_type || "",
+    "Last CSG": row.last_csg || "",
+    "Last LSG": row.last_lsg || "",
+    "Total CSG": String(row.total_csg ?? 0),
+    "Total LSG": String(row.total_lsg ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function contactToRow(data: Record<string, any>, id: string): Record<string, any> {
+  const known = new Set([
+    "id",
+    "Worker Name",
+    "Household Phone",
+    "Personal Phone",
+    "Email",
+    "Labels",
+    "Preferred Phone Type",
+    "Last CSG",
+    "Last LSG",
+    "Total CSG",
+    "Total LSG",
+    "createdAt",
+    "updatedAt",
+  ]);
+
+  const extra = Object.fromEntries(Object.entries(data).filter(([key]) => !known.has(key)));
+  return {
+    id,
+    worker_name: data["Worker Name"] || data.Name || id,
+    household_phone: data["Household Phone"] || "",
+    personal_phone: data["Personal Phone"] || "",
+    email: data.Email || "",
+    labels: splitLabels(data.Labels),
+    preferred_phone_type: data["Preferred Phone Type"] || "",
+    last_csg: data["Last CSG"] || "",
+    last_lsg: data["Last LSG"] || "",
+    total_csg: parseInteger(data["Total CSG"]),
+    total_lsg: parseInteger(data["Total LSG"]),
+    extra,
+    updated_at: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+function eventFromRow(row: any): Record<string, any> {
+  return {
+    ...(row.extra || {}),
+    id: row.id,
+    date: row.event_date || "",
+    time: row.event_time || "",
+    room: row.room || "",
+    type: row.event_type || "",
+    guests: row.guests || "",
+    assignedLsgId: row.assigned_lsg_id || "",
+    assignedGroomLsgId: row.assigned_groom_lsg_id || "",
+    assignedCsgId: row.assigned_csg_id || "",
+    lsgConfirmed: !!row.lsg_confirmed,
+    groomLsgConfirmed: !!row.groom_lsg_confirmed,
+    csgConfirmed: !!row.csg_confirmed,
+    status: row.status || "unassigned",
+    completed: !!row.completed,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function eventToRow(data: Record<string, any>, id: string): Record<string, any> {
+  const known = new Set([
+    "id",
+    "date",
+    "time",
+    "room",
+    "type",
+    "guests",
+    "assignedLsgId",
+    "assignedGroomLsgId",
+    "assignedCsgId",
+    "lsgConfirmed",
+    "groomLsgConfirmed",
+    "csgConfirmed",
+    "status",
+    "completed",
+    "completedAt",
+    "createdAt",
+    "updatedAt",
+  ]);
+
+  const extra = Object.fromEntries(Object.entries(data).filter(([key]) => !known.has(key)));
+  return {
+    id,
+    event_date: data.date || "",
+    event_time: data.time || "",
+    room: data.room || "",
+    event_type: data.type || "",
+    guests: data.guests || "",
+    assigned_lsg_id: nullableText(data.assignedLsgId),
+    assigned_groom_lsg_id: nullableText(data.assignedGroomLsgId),
+    assigned_csg_id: nullableText(data.assignedCsgId),
+    lsg_confirmed: !!data.lsgConfirmed,
+    groom_lsg_confirmed: !!data.groomLsgConfirmed,
+    csg_confirmed: !!data.csgConfirmed,
+    status: data.status || "unassigned",
+    completed: !!data.completed,
+    completed_at: data.completedAt || null,
+    extra,
+    updated_at: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+function conflictFromRow(row: any): Record<string, any> {
+  return {
+    ...(row.extra || {}),
+    id: row.id,
+    contactId: row.contact_id || "",
+    workerName: row.worker_name || "",
+    field: row.field || "",
+    existingValue: row.existing_value || "",
+    incomingValue: row.incoming_value || "",
+    status: row.status || "pending",
+    sheetType: row.sheet_type || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function conflictToRow(data: Record<string, any>, id: string): Record<string, any> {
+  return {
+    id,
+    contact_id: nullableText(data.contactId),
+    worker_name: data.workerName || "",
+    field: data.field || "",
+    existing_value: data.existingValue || "",
+    incoming_value: data.incomingValue || "",
+    status: data.status || "pending",
+    sheet_type: data.sheetType || "",
+    extra: {},
+    updated_at: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+function neverRuleFromRow(row: any): Record<string, any> {
+  return {
+    id: row.id,
+    contactId: row.contact_id || "",
+    field: row.field || "",
+    rule: row.rule || "NEVER",
+    createdAt: row.created_at,
+  };
+}
+
+function neverRuleToRow(data: Record<string, any>, id: string): Record<string, any> {
+  return {
+    id,
+    contact_id: nullableText(data.contactId),
+    field: data.field || "",
+    rule: data.rule || "NEVER",
+  };
+}
+
+function templateFromRow(row: any): Record<string, any> {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function templateToRow(data: Record<string, any>, id: string): Record<string, any> {
+  return {
+    id,
+    title: data.title || "",
+    content: data.content || "",
+    updated_at: data.updatedAt || new Date().toISOString(),
+  };
+}
+
+function splitLabels(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(String).map((label) => label.trim()).filter(Boolean);
+  }
+
+  return String(value || "")
+    .split(",")
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function parseInteger(value: unknown): number {
+  const parsed = parseInt(String(value || "0"), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nullableText(value: unknown): string | null {
+  const text = String(value || "").trim();
+  return text || null;
 }
 
 function handleValidatePhone(url: URL): Response {

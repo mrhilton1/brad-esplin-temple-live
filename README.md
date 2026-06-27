@@ -33,5 +33,6 @@ Use these Workers build settings:
 Add this Cloudflare Worker secret:
 
 - `GEMINI_API_KEY`: your Gemini API key
+- `SUPABASE_SERVICE_ROLE_KEY`: your Supabase service role key
 
-The frontend calls `/api/extract` and `/api/validate-phone` on the same Worker domain, so no separate backend URL is required.
+The frontend calls `/api/extract`, `/api/validate-phone`, and `/api/db/*` on the same Worker domain, so no separate backend URL is required.

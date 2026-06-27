@@ -7,8 +7,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ExtractedTableData } from "../types";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { doc, setDoc, getDoc, getDocs, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { collection, db, doc, getDocs, serverTimestamp, setDoc } from "../lib/dataStore";
 
 // Helper to convert dynamic date to YYYY-MM-DD for date input
 const formatDateForInput = (dateStr: string): string => {
@@ -130,7 +129,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
     setSaveStatus(null);
 
     try {
-      // 1. Fetch current crm_never_rules from Firestore
+      // 1. Fetch current crm_never_rules from Supabase
       const neverRulesSnapshot = await getDocs(collection(db, "crm_never_rules"));
       const neverRules = neverRulesSnapshot.docs.map(docSnap => docSnap.data());
       
@@ -649,7 +648,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
       }, 8000);
 
     } catch (err: any) {
-      console.error("Error saving to Firestore:", err);
+      console.error("Error saving to Supabase:", err);
       setSaveStatus({
         type: "error",
         message: "Failed to store records: " + (err.message || "Unknown error")
@@ -1003,7 +1002,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             </button>
 
             <button
-              id="store-firebase-db"
+              id="store-supabase-db"
               onClick={handleSaveToDatabase}
               disabled={isSavingDb}
               className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-sm shadow-sm transition-all hover:shadow-md cursor-pointer ${
