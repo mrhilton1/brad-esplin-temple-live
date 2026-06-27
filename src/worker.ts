@@ -16,10 +16,12 @@ const jsonHeaders = {
 
 const systemInstruction = `You are an expert data extraction assistant specializing in document cleaning and structure recovery.
 Your absolute goal is to extract only the main columns and tables of information from the provided PDF document.
+Return exactly the requested schema as JSON. Every row must align exactly with the columns array.
 You MUST ignore all background noise:
 - Page headers, titles, branding, and logos.
 - Page footers, page numbers, run dates, copyright messages, contact links, and address text in margins.
 - Extraneous text blocks, sidebars, or decorative margins.
+- Session summary rows, arrival times, notes, sealer lines, guest-count lines, and page-total lines unless the user's requested columns explicitly ask for them.
 
 Strictly focus on the main columns of tabular data or structural list-columns.
 Combine any fragmented rows or multi-page table flows into a single unified table structure.
@@ -115,7 +117,7 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
 
     const base64Data = pdfData.replace(/^data:application\/pdf;base64,/, "");
     const userPrompt = customInstruction
-      ? `Extract the tabular columns from this PDF document. Pay special attention to this custom rule: "${customInstruction}"`
+      ? `Extract the requested structured data from this PDF document. Follow this extraction rule exactly: ${customInstruction}`
       : "Extract all columns and rows of tabular data from the PDF document, ignoring headers, footers, margins, and non-table noise.";
 
     const ai = new GoogleGenAI({

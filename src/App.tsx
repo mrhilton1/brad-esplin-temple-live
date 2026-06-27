@@ -15,10 +15,10 @@ import { parsePdfLocally } from "./lib/pdfParser";
 
 const LOADING_STEPS = [
   "Reading PDF binary layout...",
-  "Extracting selectable PDF text locally...",
-  "Locating structural column boundaries...",
+  "Sending document pages to Gemini...",
+  "Reading highlighted event blocks...",
   "Filtering out document titles & branding headers...",
-  "Discarding page numbers, footers & margin noise...",
+  "Discarding arrivals, notes, sealers, and session totals...",
   "Standardizing column headers across pages...",
   "Formulating validated JSON structure...",
   "Completing clean data serialization..."
@@ -70,7 +70,7 @@ export default function App() {
 
   const CRM_INSTRUCTION = 'Extract clean CRM contact tabular data with exactly these columns: "Worker Name", "Household Phone", "Personal Phone", "Email", "Labels", "Preferred Phone Type". Use "Worker Name" as the primary key/column. "Preferred Phone Type" must be exactly "Personal" or "Household" (or "None" if unspecified) based on which phone number is noted as preferred. Under "Labels", identify whether they are textable (assign the tag "Textable") and identify any other tags, categories, or notes (e.g., "Contractor", "Lead", "Urgent") formatted as a simple comma-separated list of tags.';
   const HISTORY_INSTRUCTION = 'Extract clean worker activity history with exactly these columns: "Worker Name", "Date Last Served - CSG", "Date Last Served - LSG", "Total Times Served - CSG", "Total Times Served - LSG". Use "Worker Name" as the primary key/column. For columns containing dates or total times served, extract them accurately as text strings.';
-  const EVENT_INSTRUCTION = 'Extract clean daily schedule of ordinances with exactly these columns: "Date of event", "Time of event", "Room of event", "Type of event", "Names of the guests". For "Date of event", find the date header above the items (e.g. "Saturday, August 1, 2026") and repeat it for each event on that date. For "Time of event", get the event start time (e.g. "9:00 AM", "12:15 PM"). For "Room of event", get the room (e.g., "Room 1", "Room 2", "Room 3"). For "Type of event", get the type (e.g., "LICENSED MARRIAGE", "SEALING AFTER CIVIL MARRIAGE", "CHILD-TO-PARENT SEALING"). For "Names of the guests", extract the full names of the primary couple/persons exactly as listed (include any parentheses), separating different guests with a semicolon (e.g., "Rivera Trevino, Jose Jaden (Rivera, Jaden); Jones, Aycie Ila (Jones, Aycie)").';
+  const EVENT_INSTRUCTION = 'Extract only actual ordinance event rows with exactly these columns: "Date of event", "Time of event", "Room of event", "Type of event", "Names of the guests". For "Date of event", find the large date header above the events, such as "Saturday, August 1, 2026", and repeat it for every event under that date until the next date header. For "Time of event", extract only the event start time at the left, such as "9:00 AM"; do NOT use the italic arrival time in parentheses. For "Room of event", extract the room label shown on the right, such as "Room 1", "Room 2", or "Room 3"; do NOT leave this blank when a room is visible. For "Type of event", extract the ordinance type, such as "LICENSED MARRIAGE", "SEALING AFTER CIVIL MARRIAGE", or "CHILD-TO-PARENT SEALING". For "Names of the guests", extract only the couple/person names in the event block exactly as shown, including parenthetical preferred names, and join multiple names with "; ". Example: "Rivera Trevino, Jose Jaden (Rivera, Jaden); Jones, Aycie Ila (Jones, Aycie)". Ignore arrival times like "(7:45 AM Arrival)", guest counts like "40 Guests", notes, sealer lines, room totals, session total patrons lines, page headers, and page footers. Each event should be one row only.';
 
   const handlePresetSelect = (presetId: string) => {
     setSelectedPreset(presetId);
@@ -104,7 +104,7 @@ export default function App() {
     setSelectedPreset("crm_contacts");
   };
 
-  // Parse the PDF locally without sending document contents to an AI service.
+  // Use Gemini for layout-aware extraction; local parsing is only a fallback.
   const handleExtractData = async () => {
     if (!selectedFile) return;
 
@@ -112,22 +112,51 @@ export default function App() {
     setError(null);
     const intervalId = startLoadingAnimation();
 
-    try {
-      const result = await parsePdfLocally(selectedFile.base64, selectedPreset);
+    const instructionToUse =
+      selectedPreset === "crm_contacts"
+        ? CRM_INSTRUCTION
+        : selectedPreset === "worker_history"
+          ? HISTORY_INSTRUCTION
+          : EVENT_INSTRUCTION;
 
+    try {
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pdfData: selectedFile.base64,
+          customInstruction: instructionToUse,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to process the PDF document with Gemini.");
+      }
       if (result.rows.length === 0) {
         throw new Error(
-          "No table rows were found. This PDF may be scanned/image-only or use a layout that needs a custom parser rule."
+          "Gemini did not return any table rows for this PDF."
         );
       }
 
       setExtractedData(result);
     } catch (err: any) {
-      console.error("Local PDF extraction error:", err);
-      setError(
-        err.message || 
-        "Failed to extract table data from this PDF."
-      );
+      console.error("Gemini PDF extraction error:", err);
+      try {
+        const fallback = await parsePdfLocally(selectedFile.base64, selectedPreset);
+        if (fallback.rows.length > 0) {
+          setExtractedData(fallback);
+          setError("Gemini extraction failed, so a local fallback parser was used. Review rows carefully.");
+          return;
+        }
+      } catch (fallbackErr) {
+        console.error("Local PDF fallback extraction error:", fallbackErr);
+      }
+
+      setError(err.message || "Failed to extract table data from this PDF.");
     } finally {
       clearInterval(intervalId);
       setIsExtracting(false);
