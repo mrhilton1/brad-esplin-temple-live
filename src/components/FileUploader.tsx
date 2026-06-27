@@ -14,9 +14,14 @@ export default function FileUploader({ onFileLoaded, onFileCleared, selectedFile
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
       setError("Please upload a PDF document. Other formats are not supported.");
+      return;
+    }
+
+    if (file.size === 0) {
+      setError("This PDF appears to be empty. On iPad, open the file first and confirm it has pages before uploading.");
       return;
     }
 
@@ -26,6 +31,17 @@ export default function FileUploader({ onFileLoaded, onFileCleared, selectedFile
     }
 
     setError(null);
+
+    try {
+      const header = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+      if (header !== "%PDF-") {
+        setError("This file does not contain valid PDF data. Try opening it on the iPad first, then share or save the actual PDF to Files before uploading.");
+        return;
+      }
+    } catch {
+      setError("Unable to inspect this PDF. Please try downloading or saving it again.");
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {

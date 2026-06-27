@@ -132,6 +132,14 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
     }
 
     const base64Data = pdfData.replace(/^data:application\/pdf;base64,/, "");
+    const pdfBytes = decodeBase64(base64Data);
+    const pdfHeader = new TextDecoder().decode(pdfBytes.slice(0, 5));
+    if (pdfBytes.length === 0 || pdfHeader !== "%PDF-") {
+      return json({
+        error: "The uploaded file is not a readable PDF. If you are on iPad, open the downloaded file first and confirm it has pages, then save/share the actual PDF to Files before uploading.",
+      }, 400);
+    }
+
     const userPrompt = customInstruction
       ? `Extract the requested structured data from this PDF document. Follow this extraction rule exactly: ${customInstruction}`
       : "Extract all columns and rows of tabular data from the PDF document, ignoring headers, footers, margins, and non-table noise.";
@@ -202,8 +210,15 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
       headers: jsonHeaders,
     });
   } catch (error: any) {
+    const message = error?.message || "";
+    if (/no pages|invalid argument/i.test(message)) {
+      return json({
+        error: "Gemini could not find readable pages in this PDF. On iPad, this often means the saved file is empty, a download placeholder, or not the real PDF. Open the PDF in Files first to confirm pages are visible, then upload that file again.",
+      }, 400);
+    }
+
     return json({
-      error: error?.message || "An unexpected error occurred during PDF processing.",
+      error: message || "An unexpected error occurred during PDF processing.",
     }, 500);
   }
 }
@@ -664,6 +679,15 @@ function cleanEmailValue(value: unknown): string {
   return String(value || "")
     .replace(/\s*\(preferred\)\s*/gi, "")
     .trim();
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 function chunks<T>(values: T[], size: number): T[][] {
