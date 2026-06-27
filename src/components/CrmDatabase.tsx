@@ -524,6 +524,20 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     setAppModal(null);
   };
 
+  const openAddContactForm = () => {
+    setShowAddRow(true);
+    setShowAddCol(false);
+    setNewContact(prev => {
+      const next = { ...prev };
+      columns.forEach(col => {
+        if (next[col] === undefined) {
+          next[col] = "";
+        }
+      });
+      return next;
+    });
+  };
+
   const handleInsertTextAtCursor = (textToInsert: string) => {
     const textarea = textareaRef.current;
     if (!textarea) {
@@ -1162,6 +1176,19 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
               {/* Label Filter Dropdown & Clear Options */}
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={openAddContactForm}
+                  className={`flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl transition-all border cursor-pointer shadow-sm ${
+                    showAddRow
+                      ? "bg-indigo-600 border-indigo-500 text-white"
+                      : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
+                  }`}
+                  title="Add contact"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Add Contact</span>
+                </button>
                 <div className="relative">
                   <button
                     onClick={() => setShowLabelDropdown(!showLabelDropdown)}
