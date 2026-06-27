@@ -410,11 +410,12 @@ async function supabaseRequest(env: Env, table: string, query = "", init: Reques
     throw new Error(`Supabase ${response.status}: ${text}`);
   }
 
-  if (response.status === 204) {
+  const text = await response.text();
+  if (response.status === 204 || !text.trim()) {
     return null;
   }
 
-  return response.json();
+  return JSON.parse(text);
 }
 
 function contactFromRow(row: any): Record<string, any> {

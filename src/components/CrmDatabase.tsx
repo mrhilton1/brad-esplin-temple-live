@@ -420,6 +420,16 @@ interface CrmDatabaseProps {
   activeView?: "contacts" | "reviews";
 }
 
+interface AppModalState {
+  title: string;
+  message: string;
+  kind: "alert" | "confirm";
+  confirmLabel: string;
+  cancelLabel?: string;
+  variant?: "default" | "danger";
+  resolve: (confirmed: boolean) => void;
+}
+
 // --- Main CrmDatabase Component ---
 export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProps) {
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
@@ -434,6 +444,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const [conflictsLoading, setConflictsLoading] = useState(false);
   const [bulkResolving, setBulkResolving] = useState(false);
   const [bulkResolveMessage, setBulkResolveMessage] = useState<string | null>(null);
+  const [appModal, setAppModal] = useState<AppModalState | null>(null);
 
   // Core clean dynamic columns list
   const [columns, setColumns] = useState<string[]>([
@@ -468,6 +479,44 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const [showAddTemplateForm, setShowAddTemplateForm] = useState<boolean>(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const showModal = (options: Omit<AppModalState, "resolve">): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setAppModal({ ...options, resolve });
+    });
+  };
+
+  const showAlertModal = (message: string, title = "Notice", variant: "default" | "danger" = "default") => {
+    return showModal({
+      title,
+      message,
+      kind: "alert",
+      confirmLabel: "OK",
+      variant,
+    });
+  };
+
+  const showConfirmModal = (
+    message: string,
+    title = "Confirm",
+    variant: "default" | "danger" = "default",
+    confirmLabel = "Continue",
+  ) => {
+    return showModal({
+      title,
+      message,
+      kind: "confirm",
+      confirmLabel,
+      cancelLabel: "Cancel",
+      variant,
+    });
+  };
+
+  const closeAppModal = (confirmed: boolean) => {
+    if (!appModal) return;
+    appModal.resolve(confirmed);
+    setAppModal(null);
+  };
 
   const handleInsertTextAtCursor = (textToInsert: string) => {
     const textarea = textareaRef.current;
@@ -657,7 +706,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       await fetchConflicts();
     } catch (err) {
       console.error("Error resolving conflict:", err);
-      alert("Failed to resolve conflict.");
+      await showAlertModal("Failed to resolve conflict.", "Unable to Save Decision", "danger");
     }
   };
 
@@ -670,7 +719,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       ? `Apply all ${pending.length} pending decisions? This includes ${presenceCount} volunteer status decision${presenceCount === 1 ? "" : "s"} that will delete contacts marked missing from the uploaded worker list.`
       : `Apply all ${pending.length} pending decisions and overwrite those CRM fields with the incoming PDF values?`;
 
-    if (!confirm(confirmMessage)) return;
+    if (!await showConfirmModal(confirmMessage, "Accept All Pending Decisions", presenceCount > 0 ? "danger" : "default", "Accept All")) return;
 
     setBulkResolving(true);
     setBulkResolveMessage(null);
@@ -694,14 +743,14 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     } catch (err: any) {
       console.error("Error applying all conflicts:", err);
       setBulkResolveMessage(err.message || "Failed to apply all pending decisions.");
-      alert(err.message || "Failed to apply all pending decisions.");
+      await showAlertModal(err.message || "Failed to apply all pending decisions.", "Bulk Apply Failed", "danger");
     } finally {
       setBulkResolving(false);
     }
   };
 
   const clearResolvedLogs = async () => {
-    if (!confirm("Are you sure you want to clear all resolved conflict logs?")) return;
+    if (!await showConfirmModal("Are you sure you want to clear all resolved conflict logs?", "Clear Decision History", "danger", "Clear History")) return;
     try {
       const resolved = conflicts.filter(c => c.status !== "pending");
       for (const r of resolved) {
@@ -764,13 +813,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       setShowAddTemplateForm(false);
     } catch (err) {
       console.error("Failed to save template:", err);
-      alert("Failed to save template.");
+      await showAlertModal("Failed to save template.", "Template Not Saved", "danger");
     }
   };
 
   // Delete Text Template in Settings tab
   const handleDeleteTemplateInSettings = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this text template?")) return;
+    if (!await showConfirmModal("Are you sure you want to delete this text template?", "Delete Template", "danger", "Delete")) return;
     try {
       await deleteDoc(doc(db, "text_templates", id));
     } catch (err) {
@@ -792,7 +841,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       setEditingCell(null);
     } catch (err) {
       console.error("Error updating cell:", err);
-      alert("Error saving change to database.");
+      await showAlertModal("Error saving change to database.", "Change Not Saved", "danger");
     }
   };
 
@@ -818,24 +867,24 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
   // Delete a contact
   const deleteContact = async (contactId: string) => {
-    if (!confirm("Are you sure you want to remove this contact from the CRM?")) return;
+    if (!await showConfirmModal("Are you sure you want to remove this contact from the CRM?", "Delete Contact", "danger", "Delete")) return;
     try {
       await deleteDoc(doc(db, "crm_contacts", contactId));
       setContacts(prev => prev.filter(c => c.id !== contactId));
     } catch (err) {
       console.error("Error deleting contact:", err);
-      alert("Failed to delete contact.");
+      await showAlertModal("Failed to delete contact.", "Contact Not Deleted", "danger");
     }
   };
 
   // Create a new custom column
-  const handleAddColumn = (e: React.FormEvent) => {
+  const handleAddColumn = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newColName.trim();
     if (!cleanName) return;
 
     if (columns.includes(cleanName)) {
-      alert("This column already exists!");
+      await showAlertModal("This column already exists!", "Duplicate Column");
       return;
     }
 
@@ -849,7 +898,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     e.preventDefault();
     const workerName = newContact["Worker Name"]?.trim();
     if (!workerName) {
-      alert("Worker Name is required as the primary key!");
+      await showAlertModal("Worker Name is required as the primary key!", "Missing Worker Name");
       return;
     }
 
@@ -877,7 +926,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       setNewContact({});
     } catch (err) {
       console.error("Error creating manual contact:", err);
-      alert("Failed to save contact.");
+      await showAlertModal("Failed to save contact.", "Contact Not Saved", "danger");
     }
   };
 
@@ -1020,6 +1069,70 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
   return (
     <div className="w-full">
+      <AnimatePresence>
+        {appModal && (
+          <motion.div
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm px-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => appModal.kind === "alert" && closeAppModal(false)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="crm-modal-title"
+              className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900 shadow-2xl overflow-hidden"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-white/10 flex items-start gap-3">
+                <div className={`mt-0.5 p-2 rounded-lg ${
+                  appModal.variant === "danger"
+                    ? "bg-rose-500/10 text-rose-300 border border-rose-500/20"
+                    : "bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                }`}>
+                  {appModal.variant === "danger" ? (
+                    <ShieldAlert className="w-5 h-5" />
+                  ) : (
+                    <Info className="w-5 h-5" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <h3 id="crm-modal-title" className="text-base font-extrabold text-white">
+                    {appModal.title}
+                  </h3>
+                  <p className="text-sm text-slate-300 leading-relaxed mt-1 whitespace-pre-wrap">
+                    {appModal.message}
+                  </p>
+                </div>
+              </div>
+              <div className="p-4 flex justify-end gap-2 bg-slate-950/40">
+                {appModal.kind === "confirm" && (
+                  <button
+                    onClick={() => closeAppModal(false)}
+                    className="px-4 py-2 text-xs font-bold rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all cursor-pointer"
+                  >
+                    {appModal.cancelLabel || "Cancel"}
+                  </button>
+                )}
+                <button
+                  onClick={() => closeAppModal(true)}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    appModal.variant === "danger"
+                      ? "bg-rose-600 hover:bg-rose-500 text-white"
+                      : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                  }`}
+                >
+                  {appModal.confirmLabel}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {activeView === "contacts" ? (
         <>
