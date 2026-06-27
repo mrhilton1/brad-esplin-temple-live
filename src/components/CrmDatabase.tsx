@@ -59,6 +59,44 @@ const cleanEmailValue = (value: string): string => {
     .trim();
 };
 
+const CORE_CONTACT_FIELDS = [
+  "Worker Name",
+  "Household Phone",
+  "Personal Phone",
+  "Email",
+  "Labels",
+] as const;
+
+const ACTIVITY_CONTACT_FIELDS = [
+  "Last CSG",
+  "Last LSG",
+  "Total CSG",
+  "Total LSG",
+] as const;
+
+const HIDDEN_CONTACT_FIELDS = new Set([
+  "id",
+  "createdAt",
+  "updatedAt",
+  "Preferred Phone Type",
+  "Is Textable?",
+  "Is Textable",
+  "Textable",
+  "Preferred Number",
+]);
+
+const isActivityContactField = (field: string): boolean => {
+  return (ACTIVITY_CONTACT_FIELDS as readonly string[]).includes(field);
+};
+
+const isCoreOrActivityContactField = (field: string): boolean => {
+  return (CORE_CONTACT_FIELDS as readonly string[]).includes(field) || isActivityContactField(field);
+};
+
+const shouldShowAsCustomContactField = (field: string): boolean => {
+  return !isCoreOrActivityContactField(field) && !HIDDEN_CONTACT_FIELDS.has(field);
+};
+
 // Helper to convert dynamic date to YYYY-MM-DD for date input
 const formatDateForInput = (dateStr: string): string => {
   if (!dateStr) return "";
@@ -655,15 +693,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         // Track and register dynamic custom fields
         Object.keys(data).forEach(key => {
           // EXCLUDE dynamic system fields & legacy hidden properties from direct column headers
-          if (
-            key !== "updatedAt" && 
-            key !== "id" && 
-            key !== "Preferred Phone Type" && 
-            key !== "Is Textable?" && 
-            key !== "Is Textable" && 
-            key !== "Textable" && 
-            key !== "Preferred Number"
-          ) {
+          if (!HIDDEN_CONTACT_FIELDS.has(key)) {
             foundFields.add(key);
           }
         });
@@ -1044,8 +1074,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         updatedAt: serverTimestamp()
       };
 
-      // Set default empty strings for other columns
-      columns.forEach(col => {
+      // Set default empty strings for manually entered contact fields only.
+      // Supabase owns created_at, and activity stats start from database defaults.
+      columns.filter(col => !isActivityContactField(col) && !HIDDEN_CONTACT_FIELDS.has(col)).forEach(col => {
         if (contactData[col] === undefined) {
           contactData[col] = "";
         }
@@ -1452,31 +1483,19 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           >
             <h3 className="font-bold text-sm text-slate-200">Create New CRM Contact Row</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {columns.map((col) => (
+              {columns.filter(col => !isActivityContactField(col) && !HIDDEN_CONTACT_FIELDS.has(col)).map((col) => (
                 <div key={col} className="space-y-1">
                   <label className="block text-xs font-semibold text-slate-400">
                     {col} {col === "Worker Name" && <span className="text-red-400">*</span>}
                   </label>
-                  {col === "Last CSG" || col === "Last LSG" ? (
-                    <input
-                      type="date"
-                      value={formatDateForInput(newContact[col] || "")}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setNewContact(prev => ({ ...prev, [col]: formatDateForDb(val) }));
-                      }}
-                      className="w-full px-3 py-2 border border-white/10 glass-input text-xs focus:outline-hidden focus:border-indigo-400 [color-scheme:dark]"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      required={col === "Worker Name"}
-                      value={newContact[col] || ""}
-                      onChange={(e) => setNewContact(prev => ({ ...prev, [col]: e.target.value }))}
-                      placeholder={`Enter ${col.toLowerCase()}...`}
-                      className="w-full px-3 py-2 border border-white/10 glass-input text-xs focus:outline-hidden focus:border-indigo-400"
-                    />
-                  )}
+                  <input
+                    type="text"
+                    required={col === "Worker Name"}
+                    value={newContact[col] || ""}
+                    onChange={(e) => setNewContact(prev => ({ ...prev, [col]: e.target.value }))}
+                    placeholder={`Enter ${col.toLowerCase()}...`}
+                    className="w-full px-3 py-2 border border-white/10 glass-input text-xs focus:outline-hidden focus:border-indigo-400"
+                  />
                 </div>
               ))}
             </div>
@@ -1518,9 +1537,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           {/* Wrapped record cards for every viewport size */}
           <div className="space-y-3 relative z-10">
             {filteredContacts.map((contact) => {
-              const customCols = columns.filter(col => 
-                !["Worker Name", "Household Phone", "Personal Phone", "Email", "Labels", "Last CSG", "Last LSG", "Total CSG", "Total LSG"].includes(col)
-              );
+              const customCols = columns.filter(shouldShowAsCustomContactField);
 
               return (
                 <div 
@@ -1675,13 +1692,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
             </form>
 
             {/* List of active custom columns */}
-            {columns.filter(col => !["Worker Name", "Household Phone", "Personal Phone", "Email", "Labels", "Last CSG", "Last LSG", "Total CSG", "Total LSG"].includes(col)).length > 0 && (
+            {columns.filter(shouldShowAsCustomContactField).length > 0 && (
               <div className="pt-2">
                 <span className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-wider block mb-2">
                   Active Custom Columns
                 </span>
                 <div className="flex flex-wrap gap-2">
-                  {columns.filter(col => !["Worker Name", "Household Phone", "Personal Phone", "Email", "Labels", "Last CSG", "Last LSG", "Total CSG", "Total LSG"].includes(col)).map(col => (
+                  {columns.filter(shouldShowAsCustomContactField).map(col => (
                     <span key={col} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/5 border border-white/10 text-slate-300">
                       {col}
                     </span>

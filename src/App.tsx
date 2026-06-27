@@ -12,6 +12,29 @@ import CrmDatabase from "./components/CrmDatabase";
 import EventMatcher from "./components/EventMatcher";
 import { UploadedFile, ExtractedTableData } from "./types";
 
+type AppTab = "extractor" | "database" | "schedule" | "reviews";
+
+const TAB_PATHS: Record<AppTab, string> = {
+  database: "/contacts",
+  schedule: "/events",
+  extractor: "/pdf",
+  reviews: "/review",
+};
+
+const PATH_TABS: Record<string, AppTab> = {
+  "/": "database",
+  "/contacts": "database",
+  "/events": "schedule",
+  "/pdf": "extractor",
+  "/review": "reviews",
+  "/settings": "reviews",
+};
+
+const getTabFromLocation = (): AppTab => {
+  if (typeof window === "undefined") return "database";
+  return PATH_TABS[window.location.pathname] || "database";
+};
+
 const LOADING_STEPS = [
   "Reading PDF binary layout...",
   "Sending document pages to Gemini...",
@@ -30,9 +53,18 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
   const [extractedData, setExtractedData] = useState<ExtractedTableData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"extractor" | "database" | "schedule" | "reviews">("database");
+  const [activeTab, setActiveTab] = useState<AppTab>(() => getTabFromLocation());
   const [contactsCount, setContactsCount] = useState<number>(0);
   const [pendingConflictsCount, setPendingConflictsCount] = useState<number>(0);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveTab(getTabFromLocation());
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     // Listen to real-time crm_contacts collection size
@@ -73,6 +105,14 @@ export default function App() {
 
   const handlePresetSelect = (presetId: string) => {
     setSelectedPreset(presetId);
+  };
+
+  const navigateToTab = (tab: AppTab) => {
+    setActiveTab(tab);
+    const nextPath = TAB_PATHS[tab];
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath);
+    }
   };
 
   // Interval timer to cycle through extraction loading messages
@@ -180,7 +220,7 @@ export default function App() {
         <div className="sticky top-0 z-[120] bg-slate-950/95 backdrop-blur-md py-4 -mx-4 px-4 border-b border-white/10 mb-0 flex justify-center md:justify-start">
           <div className="inline-flex p-1 bg-black/30 border border-white/10 rounded-xl">
             <button
-              onClick={() => setActiveTab("database")}
+              onClick={() => navigateToTab("database")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${
                 activeTab === "database"
                   ? "bg-indigo-600 text-white shadow-md"
@@ -191,7 +231,7 @@ export default function App() {
               Contacts {contactsCount > 0 ? `(${contactsCount})` : ""}
             </button>
             <button
-              onClick={() => setActiveTab("schedule")}
+              onClick={() => navigateToTab("schedule")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${
                 activeTab === "schedule"
                   ? "bg-indigo-600 text-white shadow-md"
@@ -202,7 +242,7 @@ export default function App() {
               Events
             </button>
             <button
-              onClick={() => setActiveTab("extractor")}
+              onClick={() => navigateToTab("extractor")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer ${
                 activeTab === "extractor"
                   ? "bg-indigo-600 text-white shadow-md"
@@ -213,7 +253,7 @@ export default function App() {
               PDF Extractor
             </button>
             <button
-              onClick={() => setActiveTab("reviews")}
+              onClick={() => navigateToTab("reviews")}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all cursor-pointer relative ${
                 activeTab === "reviews"
                   ? "bg-indigo-600 text-white shadow-md"
