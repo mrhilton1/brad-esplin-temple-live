@@ -3,6 +3,9 @@
   "name": "brad-esplin-temple-live",
   "main": "src/worker.ts",
   "compatibility_date": "2026-06-26",
+  "build": {
+    "command": "npm run build"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
