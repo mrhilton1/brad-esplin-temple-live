@@ -260,6 +260,26 @@ async function handleDatabaseRequest(request: Request, env: Env, url: URL): Prom
     }
 
     if (request.method === "DELETE" && id) {
+      if (collectionName === "events") {
+        const existingRow = await supabaseRow(env, config.table, id);
+        const hasAssignedWorkers = !!(
+          existingRow?.assigned_lsg_id ||
+          existingRow?.assigned_groom_lsg_id ||
+          existingRow?.assigned_csg_id
+        );
+
+        if (hasAssignedWorkers) {
+          const now = new Date().toISOString();
+          const saved = await supabaseUpsert(env, config.table, {
+            ...existingRow,
+            id,
+            status: "deleted",
+            updated_at: now,
+          });
+          return json({ ok: true, softDeleted: true, record: config.fromRow(saved) });
+        }
+      }
+
       await supabaseDelete(env, config.table, id);
       return json({ ok: true });
     }

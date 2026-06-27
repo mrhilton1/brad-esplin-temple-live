@@ -88,6 +88,10 @@ const eventNeedsCsg = (event: EventRecord): boolean => {
   );
 };
 
+const eventHasAssignedWorkers = (event: EventRecord): boolean => {
+  return !!(event.assignedLsgId || event.assignedGroomLsgId || event.assignedCsgId);
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -862,18 +866,37 @@ export default function EventMatcher() {
     }
   };
 
-  // Dismiss / Acknowledge Deleted Event
-  const handleDeleteEvent = async (eventId: string) => {
+  // Dismiss / Acknowledge Deleted Event. Assigned events stay visible as soft-deleted
+  // so workers can still be messaged about the cancellation.
+  const handleDeleteEvent = async (event: EventRecord) => {
     try {
-      await deleteDoc(doc(db, "events", eventId));
-      setEvents(events.filter(e => e.id !== eventId));
+      if (eventHasAssignedWorkers(event)) {
+        await updateDoc(doc(db, "events", event.id), {
+          status: "deleted",
+          updatedAt: serverTimestamp()
+        });
+        setEvents(events.map(e => e.id === event.id ? { ...e, status: "deleted" } : e));
+        setSyncStatus({
+          type: "success",
+          message: "Event kept as DELETED because workers are assigned. It will remain visible so you can message them about the cancellation."
+        });
+        setTimeout(() => setSyncStatus(null), 7000);
+        return;
+      }
+
+      await deleteDoc(doc(db, "events", event.id));
+      setEvents(events.filter(e => e.id !== event.id));
       setSyncStatus({
         type: "success",
-        message: "Event deletion acknowledged. Removed from schedule list."
+        message: "Event deletion acknowledged. Removed from schedule list because no workers were assigned."
       });
       setTimeout(() => setSyncStatus(null), 4000);
     } catch (err) {
       console.error("Failed to delete event:", err);
+      setSyncStatus({
+        type: "error",
+        message: "Failed to update deleted event status."
+      });
     }
   };
 
@@ -1849,11 +1872,11 @@ export default function EventMatcher() {
 
                           {event.status === "deleted" && (
                             <button
-                              onClick={() => handleDeleteEvent(event.id)}
+                              onClick={() => handleDeleteEvent(event)}
                               className="flex items-center gap-1 px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-white border border-red-500/30 hover:border-red-500/50 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>Dismiss</span>
+                              <span>{eventHasAssignedWorkers(event) ? "Keep Deleted" : "Dismiss"}</span>
                             </button>
                           )}
 
