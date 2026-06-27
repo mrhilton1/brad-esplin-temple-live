@@ -11,7 +11,6 @@ import TablePreview from "./components/TablePreview";
 import CrmDatabase from "./components/CrmDatabase";
 import EventMatcher from "./components/EventMatcher";
 import { UploadedFile, ExtractedTableData } from "./types";
-import { parsePdfLocally } from "./lib/pdfParser";
 
 const LOADING_STEPS = [
   "Reading PDF binary layout...",
@@ -104,7 +103,7 @@ export default function App() {
     setSelectedPreset("crm_contacts");
   };
 
-  // Use Gemini for layout-aware extraction; local parsing is only a fallback.
+  // Use Gemini for layout-aware extraction.
   const handleExtractData = async () => {
     if (!selectedFile) return;
 
@@ -118,20 +117,26 @@ export default function App() {
         : selectedPreset === "worker_history"
           ? HISTORY_INSTRUCTION
           : EVENT_INSTRUCTION;
+    let timeoutId: number | undefined;
 
     try {
+      const controller = new AbortController();
+      timeoutId = window.setTimeout(() => controller.abort(), 120000);
       const response = await fetch("/api/extract", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
         body: JSON.stringify({
           pdfData: selectedFile.base64,
           customInstruction: instructionToUse,
         }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({
+        error: "The extraction server returned a non-JSON response.",
+      }));
 
       if (!response.ok) {
         throw new Error(result.error || "Failed to process the PDF document with Gemini.");
@@ -145,19 +150,15 @@ export default function App() {
       setExtractedData(result);
     } catch (err: any) {
       console.error("Gemini PDF extraction error:", err);
-      try {
-        const fallback = await parsePdfLocally(selectedFile.base64, selectedPreset);
-        if (fallback.rows.length > 0) {
-          setExtractedData(fallback);
-          setError("Gemini extraction failed, so a local fallback parser was used. Review rows carefully.");
-          return;
-        }
-      } catch (fallbackErr) {
-        console.error("Local PDF fallback extraction error:", fallbackErr);
-      }
-
-      setError(err.message || "Failed to extract table data from this PDF.");
+      setError(
+        err.name === "AbortError"
+          ? "Gemini extraction timed out after 2 minutes. Try a smaller PDF or split the report into fewer pages."
+          : err.message || "Failed to extract table data from this PDF."
+      );
     } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
       clearInterval(intervalId);
       setIsExtracting(false);
     }
