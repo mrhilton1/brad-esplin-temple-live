@@ -53,6 +53,12 @@ const getTagColors = (tag: string) => {
   return colors[hash % colors.length];
 };
 
+const cleanEmailValue = (value: string): string => {
+  return String(value || "")
+    .replace(/\s*\(preferred\)\s*/gi, "")
+    .trim();
+};
+
 // Helper to convert dynamic date to YYYY-MM-DD for date input
 const formatDateForInput = (dateStr: string): string => {
   if (!dateStr) return "";
@@ -577,6 +583,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           }
         }
         data["Labels"] = labels.join(", ");
+        data["Email"] = cleanEmailValue(data["Email"] || "");
 
         // 2. Migrate "Preferred Number" -> Preferred Phone Type ("Personal" or "Household")
         if (!data["Preferred Phone Type"] && data["Preferred Number"]) {
@@ -830,14 +837,15 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   // Update a specific cell in Supabase
   const updateContactField = async (contactId: string, field: string, value: string) => {
     try {
+      const savedValue = field === "Email" ? cleanEmailValue(value) : value;
       const contactRef = doc(db, "crm_contacts", contactId);
       await updateDoc(contactRef, {
-        [field]: value,
+        [field]: savedValue,
         updatedAt: serverTimestamp()
       });
 
       // Update local state
-      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, [field]: value } : c));
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, [field]: savedValue } : c));
       setEditingCell(null);
     } catch (err) {
       console.error("Error updating cell:", err);
@@ -908,6 +916,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       const docRef = doc(db, "crm_contacts", documentId);
       const contactData = {
         ...newContact,
+        Email: cleanEmailValue(newContact.Email || ""),
         updatedAt: serverTimestamp()
       };
 

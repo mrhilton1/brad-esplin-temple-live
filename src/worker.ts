@@ -65,6 +65,14 @@ export default {
       return handleApplyAllConflicts(env);
     }
 
+    if (url.pathname === "/api/maintenance/clean-emails") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      return handleCleanEmails(env);
+    }
+
     if (url.pathname.startsWith("/api/db/")) {
       return handleDatabaseRequest(request, env, url);
     }
@@ -312,6 +320,30 @@ async function handleApplyAllConflicts(env: Env): Promise<Response> {
   }
 }
 
+async function handleCleanEmails(env: Env): Promise<Response> {
+  try {
+    const contactRows = await supabaseRows(env, collections.crm_contacts.table);
+    const cleanedRows = contactRows
+      .map((row) => {
+        const cleanedEmail = cleanEmailValue(row.email);
+        return cleanedEmail !== (row.email || "") ? { ...row, email: cleanedEmail } : null;
+      })
+      .filter(Boolean) as Record<string, any>[];
+
+    for (const chunk of chunks(cleanedRows, 100)) {
+      await supabaseUpsertMany(env, collections.crm_contacts.table, chunk);
+    }
+
+    return json({
+      ok: true,
+      scanned: contactRows.length,
+      cleaned: cleanedRows.length,
+    });
+  } catch (error: any) {
+    return json({ error: error?.message || "Failed to clean email values." }, 500);
+  }
+}
+
 async function supabaseRows(env: Env, table: string): Promise<any[]> {
   return supabaseRequest(env, table, "?select=*");
 }
@@ -425,7 +457,7 @@ function contactFromRow(row: any): Record<string, any> {
     "Worker Name": row.worker_name || "",
     "Household Phone": row.household_phone || "",
     "Personal Phone": row.personal_phone || "",
-    Email: row.email || "",
+    Email: cleanEmailValue(row.email),
     Labels: Array.isArray(row.labels) ? row.labels.join(", ") : "",
     "Preferred Phone Type": row.preferred_phone_type || "",
     "Last CSG": row.last_csg || "",
@@ -460,7 +492,7 @@ function contactToRow(data: Record<string, any>, id: string): Record<string, any
     worker_name: data["Worker Name"] || data.Name || id,
     household_phone: data["Household Phone"] || "",
     personal_phone: data["Personal Phone"] || "",
-    email: data.Email || "",
+    email: cleanEmailValue(data.Email),
     labels: splitLabels(data.Labels),
     preferred_phone_type: data["Preferred Phone Type"] || "",
     last_csg: data["Last CSG"] || "",
@@ -626,6 +658,12 @@ function parseInteger(value: unknown): number {
 function nullableText(value: unknown): string | null {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function cleanEmailValue(value: unknown): string {
+  return String(value || "")
+    .replace(/\s*\(preferred\)\s*/gi, "")
+    .trim();
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

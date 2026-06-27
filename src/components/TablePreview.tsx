@@ -82,6 +82,12 @@ const parseDateString = (dateStr: string): Date | null => {
   return null;
 };
 
+const cleanEmailValue = (value: string): string => {
+  return String(value || "")
+    .replace(/\s*\(preferred\)\s*/gi, "")
+    .trim();
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -311,7 +317,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
           if (sheetPreset === "crm_contacts") {
             contactData["Household Phone"] = householdPhoneColIdx !== -1 ? (row[householdPhoneColIdx] || "").trim() : "";
             contactData["Personal Phone"] = personalPhoneColIdx !== -1 ? (row[personalPhoneColIdx] || "").trim() : "";
-            contactData["Email"] = emailColIdx !== -1 ? (row[emailColIdx] || "").trim() : "";
+            contactData["Email"] = emailColIdx !== -1 ? cleanEmailValue(row[emailColIdx] || "") : "";
             
             let prefVal = preferredPhoneColIdx !== -1 ? (row[preferredPhoneColIdx] || "").trim() : "";
             if (!prefVal && (contactData["Personal Phone"] || contactData["Household Phone"])) {
@@ -373,6 +379,9 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
           for (const f of fieldsToCompare) {
             if (f.idx === -1) continue;
             let incomingVal = (row[f.idx] || "").trim();
+            if (f.key === "Email") {
+              incomingVal = cleanEmailValue(incomingVal);
+            }
             const existingVal = (existingData[f.key] || "").trim();
 
             if (f.key === "Preferred Phone Type" && !incomingVal && (row[personalPhoneColIdx] || row[householdPhoneColIdx])) {
