@@ -88,6 +88,23 @@ const cleanEmailValue = (value: string): string => {
     .trim();
 };
 
+const getEventDecisionTitle = (event: Record<string, any>, fallback = "Event") => {
+  return event.guests || fallback;
+};
+
+const getComparableEventDetails = (event: Record<string, any>) => ({
+  date: event.date || "",
+  time: event.time || "",
+  room: event.room || "",
+  type: event.type || "",
+  guests: event.guests || "",
+});
+
+const getEventDateRangeLabel = (start: Date | null, end: Date | null) => {
+  if (!start || !end) return "the uploaded schedule date range";
+  return `${formatDateForInput(start.toISOString())} through ${formatDateForInput(end.toISOString())}`;
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -214,6 +231,8 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
       let conflictsCount = 0;
       let appliedCount = 0;
       const allIncomingDocIds = new Set<string>();
+      let incomingEventStart: Date | null = null;
+      let incomingEventEnd: Date | null = null;
 
       // Iterate and compare each row
       for (let i = 0; i < rows.length; i++) {
@@ -234,6 +253,16 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
           const guestsVal = guestsIdx !== -1 ? (row[guestsIdx] || "").trim() : "";
 
           if (!guestsVal) continue;
+          const parsedIncomingDate = parseDateString(dateVal);
+          if (parsedIncomingDate) {
+            parsedIncomingDate.setHours(0, 0, 0, 0);
+            if (!incomingEventStart || parsedIncomingDate < incomingEventStart) {
+              incomingEventStart = new Date(parsedIncomingDate);
+            }
+            if (!incomingEventEnd || parsedIncomingDate > incomingEventEnd) {
+              incomingEventEnd = new Date(parsedIncomingDate);
+            }
+          }
 
           const eventId = "event_" + guestsVal.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
           allIncomingDocIds.add(eventId);
@@ -265,15 +294,26 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               (existingEvent.type !== typeVal);
 
             if (isChanged) {
-              await setDoc(eventRef, {
+              const incomingEvent = {
                 date: dateVal,
                 time: timeVal,
                 room: roomVal,
                 type: typeVal,
-                status: "changed",
+                guests: guestsVal,
+              };
+              const conflictId = `event_conflict_${eventId}_details`;
+              await setDoc(doc(db, "crm_sync_conflicts", conflictId), {
+                id: conflictId,
+                contactId: eventId,
+                workerName: getEventDecisionTitle(existingEvent, guestsVal),
+                field: "Event Details",
+                existingValue: JSON.stringify(getComparableEventDetails(existingEvent)),
+                incomingValue: JSON.stringify(incomingEvent),
+                status: "pending",
+                sheetType: "event_schedule",
                 updatedAt: serverTimestamp()
-              }, { merge: true });
-              savedCount++;
+              });
+              conflictsCount++;
             } else if (existingEvent.status === "deleted") {
               const restoredStatus = existingEvent.assignedLsgId ? "assigned" : "unassigned";
               await setDoc(eventRef, {
@@ -625,12 +665,31 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
           if (!allIncomingDocIds.has(id)) {
             const eventObj = existingEvents[id];
             const isPast = isDateInPast(eventObj.date);
-            if (!isPast && eventObj.status !== "deleted") {
-              // Mark upcoming missing events as deleted (Red indicator)
-              await setDoc(doc(db, "events", id), {
-                status: "deleted",
+            const parsedExistingDate = parseDateString(eventObj.date);
+            if (parsedExistingDate) parsedExistingDate.setHours(0, 0, 0, 0);
+            const isInsideUploadedDateRange = !!(
+              parsedExistingDate &&
+              incomingEventStart &&
+              incomingEventEnd &&
+              parsedExistingDate >= incomingEventStart &&
+              parsedExistingDate <= incomingEventEnd
+            );
+            if (!isPast && eventObj.status !== "deleted" && isInsideUploadedDateRange) {
+              const conflictId = `event_conflict_${id}_delete`;
+              await setDoc(doc(db, "crm_sync_conflicts", conflictId), {
+                id: conflictId,
+                contactId: id,
+                workerName: getEventDecisionTitle(eventObj, id),
+                field: "Event Deletion",
+                existingValue: JSON.stringify(getComparableEventDetails(eventObj)),
+                incomingValue: JSON.stringify({
+                  action: "delete",
+                  reason: `Missing from uploaded schedule covering ${getEventDateRangeLabel(incomingEventStart, incomingEventEnd)}.`,
+                }),
+                status: "pending",
+                sheetType: "event_schedule",
                 updatedAt: serverTimestamp()
-              }, { merge: true });
+              });
               conflictsCount++;
             }
           }

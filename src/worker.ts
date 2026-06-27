@@ -280,8 +280,10 @@ async function handleApplyAllConflicts(env: Env): Promise<Response> {
 
     const pendingConflicts = pendingRows.map(conflictFromRow);
     const now = new Date().toISOString();
-    const presenceConflicts = pendingConflicts.filter((conflict: any) => conflict.field === "Presence");
-    const fieldConflicts = pendingConflicts.filter((conflict: any) => conflict.field !== "Presence");
+    const eventConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType === "event_schedule");
+    const contactConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType !== "event_schedule");
+    const presenceConflicts = contactConflicts.filter((conflict: any) => conflict.field === "Presence");
+    const fieldConflicts = contactConflicts.filter((conflict: any) => conflict.field !== "Presence");
 
     const contactIdsToDelete = uniqueValues(presenceConflicts.map((conflict: any) => conflict.contactId));
     for (const chunk of chunks(contactIdsToDelete, 100)) {
@@ -316,6 +318,46 @@ async function handleApplyAllConflicts(env: Env): Promise<Response> {
       await supabaseUpsertMany(env, collections.crm_contacts.table, chunk);
     }
 
+    const eventIdsToUpdate = uniqueValues(eventConflicts.map((conflict: any) => conflict.contactId));
+    const existingEventRows: any[] = [];
+    for (const chunk of chunks(eventIdsToUpdate, 100)) {
+      existingEventRows.push(...await supabaseRowsByIds(env, collections.events.table, chunk));
+    }
+
+    const eventsById = new Map<string, Record<string, any>>();
+    for (const row of existingEventRows) {
+      eventsById.set(row.id, eventFromRow(row));
+    }
+
+    for (const conflict of eventConflicts as any[]) {
+      const currentEvent = eventsById.get(conflict.contactId) || { id: conflict.contactId };
+      if (conflict.field === "Event Details") {
+        const incomingEvent = parseConflictJson(conflict.incomingValue);
+        if (!incomingEvent) continue;
+        eventsById.set(conflict.contactId, {
+          ...currentEvent,
+          date: incomingEvent.date || "",
+          time: incomingEvent.time || "",
+          room: incomingEvent.room || "",
+          type: incomingEvent.type || "",
+          guests: incomingEvent.guests || currentEvent.guests || "",
+          status: "changed",
+          updatedAt: now,
+        });
+      } else if (conflict.field === "Event Deletion") {
+        eventsById.set(conflict.contactId, {
+          ...currentEvent,
+          status: "deleted",
+          updatedAt: now,
+        });
+      }
+    }
+
+    const eventRowsToUpsert = Array.from(eventsById.entries()).map(([id, event]) => eventToRow(event, id));
+    for (const chunk of chunks(eventRowsToUpsert, 100)) {
+      await supabaseUpsertMany(env, collections.events.table, chunk);
+    }
+
     const conflictIds: string[] = pendingConflicts.map((conflict: any) => String(conflict.id || "")).filter(Boolean);
     for (const chunk of chunks(conflictIds, 100)) {
       await supabasePatchMany(env, collections.crm_sync_conflicts.table, chunk, {
@@ -329,6 +371,7 @@ async function handleApplyAllConflicts(env: Env): Promise<Response> {
       applied: pendingConflicts.length,
       contactsUpdated: contactRowsToUpsert.length,
       contactsDeleted: contactIdsToDelete.length,
+      eventsUpdated: eventRowsToUpsert.length,
     });
   } catch (error: any) {
     return json({ error: error?.message || "Failed to apply all pending conflicts." }, 500);
@@ -679,6 +722,15 @@ function cleanEmailValue(value: unknown): string {
   return String(value || "")
     .replace(/\s*\(preferred\)\s*/gi, "")
     .trim();
+}
+
+function parseConflictJson(value: unknown): Record<string, any> | null {
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function decodeBase64(value: string): Uint8Array {

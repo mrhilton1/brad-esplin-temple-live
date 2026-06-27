@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  collection, db, deleteDoc, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc,
+  collection, db, deleteDoc, doc, getDoc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc,
 } from "../lib/dataStore";
 
 interface ContactRecord {
@@ -422,6 +422,41 @@ interface ConflictRecord {
   updatedAt: any;
 }
 
+const isEventConflict = (conflict: ConflictRecord) => conflict.sheetType === "event_schedule";
+
+const parseConflictJson = (value: string): Record<string, any> | null => {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const formatEventConflictValue = (value: string) => {
+  const parsed = parseConflictJson(value);
+  if (!parsed) return value;
+
+  if (parsed.action === "delete") {
+    return parsed.reason || "Missing from uploaded schedule.";
+  }
+  if (parsed.action === "existing_status") {
+    return parsed.reason || `Already marked ${parsed.status || "changed"}.`;
+  }
+
+  return [
+    parsed.date ? `Date: ${parsed.date}` : "",
+    parsed.time ? `Time: ${parsed.time}` : "",
+    parsed.room ? `Room: ${parsed.room}` : "",
+    parsed.type ? `Type: ${parsed.type}` : "",
+    parsed.guests ? `Guests: ${parsed.guests}` : "",
+  ].filter(Boolean).join("\n");
+};
+
+const inferEventStatusFromAssignments = (event: Record<string, any>) => {
+  return event.assignedLsgId && event.assignedGroomLsgId && event.assignedCsgId ? "assigned" : "unassigned";
+};
+
 interface CrmDatabaseProps {
   activeView?: "contacts" | "reviews";
 }
@@ -662,6 +697,42 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           ...docSnap.data()
         } as ConflictRecord);
       });
+      const existingConflictIds = new Set(records.map(record => record.id));
+      const eventsSnapshot = await getDocs(collection(db, "events"));
+      for (const docSnap of eventsSnapshot.docs) {
+        const event: Record<string, any> = { id: docSnap.id, ...docSnap.data() };
+        if (event.status !== "changed" && event.status !== "deleted") continue;
+
+        const syntheticId = `event_status_${docSnap.id}_${event.status}`;
+        if (existingConflictIds.has(syntheticId)) continue;
+
+        const syntheticConflict = {
+          id: syntheticId,
+          contactId: docSnap.id,
+          workerName: event.guests || docSnap.id,
+          field: event.status === "deleted" ? "Event Deletion" : "Event Status",
+          existingValue: JSON.stringify({
+            date: event.date || "",
+            time: event.time || "",
+            room: event.room || "",
+            type: event.type || "",
+            guests: event.guests || "",
+          }),
+          incomingValue: JSON.stringify({
+            action: "existing_status",
+            status: event.status,
+            reason: event.status === "deleted"
+              ? "This event is currently marked deleted. Accept to keep it deleted, or dismiss to restore it."
+              : "This event is currently marked changed. Accept to keep it flagged for reconfirmation, or dismiss to restore normal status.",
+          }),
+          status: "pending",
+          sheetType: "event_schedule",
+          updatedAt: event.updatedAt,
+        } as ConflictRecord;
+        await setDoc(doc(db, "crm_sync_conflicts", syntheticId), syntheticConflict);
+        existingConflictIds.add(syntheticId);
+        records.push(syntheticConflict);
+      }
       // Sort: pending first, then by id descending
       records.sort((a, b) => {
         if (a.status === "pending" && b.status !== "pending") return -1;
@@ -682,9 +753,38 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   ) => {
     try {
       const conflictRef = doc(db, "crm_sync_conflicts", conflict.id);
+      const writeConflictStatus = async (status: "applied" | "rejected") => {
+        await setDoc(conflictRef, {
+          ...conflict,
+          status,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      };
       
       if (decision === "yes") {
-        if (conflict.field === "Presence") {
+        if (isEventConflict(conflict)) {
+          const eventRef = doc(db, "events", conflict.contactId);
+          if (conflict.field === "Event Details") {
+            const incomingEvent = parseConflictJson(conflict.incomingValue);
+            if (!incomingEvent) {
+              throw new Error("Missing incoming event details.");
+            }
+            await setDoc(eventRef, {
+              date: incomingEvent.date || "",
+              time: incomingEvent.time || "",
+              room: incomingEvent.room || "",
+              type: incomingEvent.type || "",
+              guests: incomingEvent.guests || "",
+              status: "changed",
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          } else if (conflict.field === "Event Deletion") {
+            await setDoc(eventRef, {
+              status: "deleted",
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+        } else if (conflict.field === "Presence") {
           // Yes means delete the contact as they are no longer a volunteer
           await deleteDoc(doc(db, "crm_contacts", conflict.contactId));
         } else {
@@ -696,16 +796,22 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           }, { merge: true });
         }
         // Update conflict status to resolved/applied
-        await updateDoc(conflictRef, {
-          status: "applied",
-          updatedAt: serverTimestamp()
-        });
+        await writeConflictStatus("applied");
       } else if (decision === "no") {
+        if (isEventConflict(conflict)) {
+          const incomingEvent = parseConflictJson(conflict.incomingValue);
+          if (incomingEvent?.action === "existing_status") {
+            const eventRef = doc(db, "events", conflict.contactId);
+            const eventSnapshot = await getDoc(eventRef);
+            const eventData = eventSnapshot.data();
+            await setDoc(eventRef, {
+              status: inferEventStatusFromAssignments(eventData),
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+        }
         // Reject the incoming value: keep existing, mark conflict as rejected
-        await updateDoc(conflictRef, {
-          status: "rejected",
-          updatedAt: serverTimestamp()
-        });
+        await writeConflictStatus("rejected");
       } else if (decision === "never") {
         // Never overwrite this field: save rule to crm_never_rules
         const ruleId = `${conflict.contactId}_${conflict.field.toLowerCase().replace(/\s+/g, "_")}`;
@@ -716,10 +822,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           createdAt: serverTimestamp()
         });
         // Reject this conflict
-        await updateDoc(conflictRef, {
-          status: "rejected",
-          updatedAt: serverTimestamp()
-        });
+        await writeConflictStatus("rejected");
       }
 
       // Refresh both
@@ -735,9 +838,16 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     const pending = conflicts.filter(c => c.status === "pending");
     if (pending.length === 0 || bulkResolving) return;
 
-    const presenceCount = pending.filter(c => c.field === "Presence").length;
-    const confirmMessage = presenceCount > 0
-      ? `Apply all ${pending.length} pending decisions? This includes ${presenceCount} volunteer status decision${presenceCount === 1 ? "" : "s"} that will delete contacts marked missing from the uploaded worker list.`
+    const presenceCount = pending.filter(c => c.field === "Presence" && !isEventConflict(c)).length;
+    const eventDeletionCount = pending.filter(c => c.field === "Event Deletion").length;
+    const eventChangeCount = pending.filter(c => c.field === "Event Details").length;
+    const warningParts = [
+      presenceCount ? `${presenceCount} volunteer status decision${presenceCount === 1 ? "" : "s"} that will delete contacts marked missing from the uploaded worker list` : "",
+      eventDeletionCount ? `${eventDeletionCount} event deletion suggestion${eventDeletionCount === 1 ? "" : "s"}` : "",
+      eventChangeCount ? `${eventChangeCount} event detail change${eventChangeCount === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
+    const confirmMessage = warningParts.length > 0
+      ? `Apply all ${pending.length} pending decisions? This includes ${warningParts.join(", ")}.`
       : `Apply all ${pending.length} pending decisions and overwrite those CRM fields with the incoming PDF values?`;
 
     if (!await showConfirmModal(confirmMessage, "Accept All Pending Decisions", presenceCount > 0 ? "danger" : "default", "Accept All")) return;
@@ -757,7 +867,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       }
 
       setBulkResolveMessage(
-        `Applied ${result.applied} decisions. Updated ${result.contactsUpdated} contacts${result.contactsDeleted ? ` and deleted ${result.contactsDeleted}` : ""}.`
+        `Applied ${result.applied} decisions. Updated ${result.contactsUpdated} contacts${result.contactsDeleted ? `, deleted ${result.contactsDeleted} contacts` : ""}${result.eventsUpdated ? `, and updated ${result.eventsUpdated} events` : ""}.`
       );
       await fetchContacts();
       await fetchConflicts();
@@ -1871,8 +1981,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded-md border border-indigo-500/20 uppercase tracking-wider">
-                              {conflict.sheetType === "worker_history" ? "History Report" : "Search Results"}
+                              {conflict.sheetType === "worker_history" ? "History Report" : isEventConflict(conflict) ? "Event Schedule" : "Search Results"}
                             </span>
+                            {isEventConflict(conflict) && (
+                              <span className="bg-amber-500/15 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-amber-500/25 uppercase tracking-wider">
+                                Event Review
+                              </span>
+                            )}
                             {conflict.field === "Presence" && (
                               <span className="bg-rose-500/20 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-rose-500/30 uppercase tracking-wider">
                                 Volunteer Status
@@ -1893,9 +2008,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/20 p-4 rounded-lg border border-white/5 text-sm">
                         <div className="space-y-1">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Existing CRM Value:</span>
-                          <span className="font-medium text-slate-300">
+                          <span className="font-medium text-slate-300 whitespace-pre-wrap">
                             {conflict.existingValue ? (
-                              conflict.existingValue
+                              isEventConflict(conflict) ? formatEventConflictValue(conflict.existingValue) : conflict.existingValue
                             ) : (
                               <span className="text-slate-600 italic text-xs">empty</span>
                             )}
@@ -1903,9 +2018,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         </div>
                         <div className="space-y-1 sm:border-l sm:border-white/5 sm:pl-4">
                           <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Incoming PDF Value:</span>
-                          <span className="font-bold text-white">
+                          <span className="font-bold text-white whitespace-pre-wrap">
                             {conflict.incomingValue ? (
-                              conflict.incomingValue
+                              isEventConflict(conflict) ? formatEventConflictValue(conflict.incomingValue) : conflict.incomingValue
                             ) : (
                               <span className="text-slate-600 italic text-xs">empty</span>
                             )}
@@ -1916,7 +2031,11 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                       {/* Actions */}
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-1 border-t border-white/5 mt-2">
                         <span className="text-[11px] text-slate-400 leading-relaxed max-w-md">
-                          {conflict.field === "Presence" 
+                          {isEventConflict(conflict)
+                            ? conflict.field === "Event Deletion"
+                              ? "Accepting will mark this event deleted. Skipping keeps the event and its current status."
+                              : "Accepting will apply the incoming event details and mark it changed for reconfirmation. Skipping keeps the current event details."
+                            : conflict.field === "Presence" 
                             ? "Accepting (Yes) will delete this contact from your CRM directory, rejecting (No) keeps them active."
                             : "Accepting (Yes) will overwrite the field. Rejecting (No) keeps your manual edits secure."
                           }
@@ -1928,7 +2047,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/50 disabled:text-emerald-200/60 text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 shadow-xs"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            Yes, Apply
+                            {isEventConflict(conflict) ? "Accept" : "Yes, Apply"}
                           </button>
                           <button
                             onClick={() => handleResolveConflict(conflict, "no")}
@@ -1936,16 +2055,18 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                             className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 disabled:bg-white/5 disabled:text-slate-500 text-slate-300 hover:text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 border border-white/10"
                           >
                             <X className="w-3.5 h-3.5" />
-                            No, Skip
+                            {isEventConflict(conflict) ? "Dismiss" : "No, Skip"}
                           </button>
-                          <button
-                            onClick={() => handleResolveConflict(conflict, "never")}
-                            disabled={bulkResolving}
-                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 disabled:bg-red-500/5 disabled:text-red-300/50 text-red-300 hover:text-red-200 text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all border border-red-500/25"
-                            title="Never prompt or overwrite this field or contact again"
-                          >
-                            NEVER OVERWRITE
-                          </button>
+                          {!isEventConflict(conflict) && (
+                            <button
+                              onClick={() => handleResolveConflict(conflict, "never")}
+                              disabled={bulkResolving}
+                              className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 disabled:bg-red-500/5 disabled:text-red-300/50 text-red-300 hover:text-red-200 text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all border border-red-500/25"
+                              title="Never prompt or overwrite this field or contact again"
+                            >
+                              NEVER OVERWRITE
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1974,9 +2095,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                           </span>
                         </div>
                         <p className="text-slate-400 leading-normal">
-                          Value: <strong className="text-indigo-300 font-semibold">"{log.incomingValue}"</strong>
+                          Value: <strong className="text-indigo-300 font-semibold">"{isEventConflict(log) ? formatEventConflictValue(log.incomingValue) : log.incomingValue}"</strong>
                           {log.existingValue && log.existingValue !== "(None - Not in CRM)" && (
-                            <span className="text-slate-500"> (was "{log.existingValue}")</span>
+                            <span className="text-slate-500"> (was "{isEventConflict(log) ? formatEventConflictValue(log.existingValue) : log.existingValue}")</span>
                           )}
                         </p>
                       </div>
