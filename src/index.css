@@ -97,6 +97,13 @@ body {
     min-height: auto;
   }
 
+  body.printing-events #root > div > .mesh-bg-container,
+  body.printing-events #root > div > footer,
+  body.printing-events #root > div > main > :not(.event-print-view),
+  body.printing-events .event-matcher-root > :not(.event-print-sheet) {
+    display: none !important;
+  }
+
   body * {
     visibility: hidden !important;
   }
@@ -111,8 +118,7 @@ body {
   }
 
   .event-print-sheet {
-    position: absolute;
-    inset: 0;
+    position: static;
     width: 100%;
     background: #ffffff;
     color: #111827;

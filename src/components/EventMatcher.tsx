@@ -1206,7 +1206,18 @@ export default function EventMatcher() {
 
   const handlePrintSelectedEvents = () => {
     if (selectedPrintEvents.length === 0) return;
-    window.print();
+    const cleanupPrintMode = () => {
+      document.body.classList.remove("printing-events");
+      window.removeEventListener("afterprint", cleanupPrintMode);
+    };
+
+    document.body.classList.add("printing-events");
+    window.addEventListener("afterprint", cleanupPrintMode);
+
+    requestAnimationFrame(() => {
+      window.print();
+      window.setTimeout(cleanupPrintMode, 1000);
+    });
   };
 
   return (
