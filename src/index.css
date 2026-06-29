@@ -83,3 +83,236 @@ body {
   border-radius: 50%;
   filter: blur(70px);
 }
+
+@media print {
+  @page {
+    margin: 0.45in;
+    size: letter;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    min-height: auto;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .event-print-sheet,
+  .event-print-sheet * {
+    visibility: visible !important;
+  }
+
+  .event-print-sheet.hidden {
+    display: block !important;
+  }
+
+  .event-print-sheet {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: #ffffff;
+    color: #111827;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .event-print-cover {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid #111827;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
+
+  .event-print-cover h1 {
+    font-size: 20px;
+    font-weight: 800;
+    margin: 0;
+  }
+
+  .event-print-cover p {
+    font-size: 11px;
+    color: #4b5563;
+    margin: 0;
+  }
+
+  .event-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+
+  .event-print-card + .event-print-card {
+    margin-top: 14px;
+  }
+
+  .event-print-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid #cbd5e1;
+    background: #f8fafc;
+  }
+
+  .event-print-header h2 {
+    font-size: 17px;
+    line-height: 1.2;
+    margin: 0 0 6px;
+    font-weight: 800;
+    color: #111827;
+  }
+
+  .event-print-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    color: #475569;
+    font-weight: 700;
+  }
+
+  .event-print-meta span {
+    border-right: 1px solid #cbd5e1;
+    padding-right: 8px;
+  }
+
+  .event-print-meta span:last-child {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .event-print-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 0;
+  }
+
+  .event-print-panel {
+    padding: 14px;
+  }
+
+  .event-print-panel + .event-print-panel {
+    border-left: 1px solid #e2e8f0;
+  }
+
+  .event-print-room {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 12px;
+    font-size: 12px;
+  }
+
+  .event-print-room span,
+  .event-print-label {
+    color: #4f46e5;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .event-print-room strong {
+    font-size: 13px;
+    color: #111827;
+  }
+
+  .event-print-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+
+  .event-print-section h3 {
+    margin: 0;
+    padding: 8px 10px;
+    background: #eef2ff;
+    color: #312e81;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .event-print-section h3 strong {
+    color: #111827;
+    margin-left: 4px;
+  }
+
+  .event-print-worker-row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 12px;
+  }
+
+  .event-print-worker-row span {
+    color: #64748b;
+    font-weight: 800;
+  }
+
+  .event-print-worker-row strong {
+    color: #111827;
+    font-weight: 800;
+  }
+
+  .event-print-worker-row em {
+    color: #475569;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 700;
+  }
+
+  .event-print-details {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 12px;
+  }
+
+  .event-print-arrival {
+    color: #92400e;
+    font-weight: 800;
+  }
+
+  .event-print-details strong {
+    display: block;
+    margin-top: 3px;
+    color: #111827;
+    font-size: 12px;
+  }
+
+  .event-print-details ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+
+  .event-print-details li {
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+
+  .event-print-note {
+    border: 1px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .event-print-note-danger {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    color: #991b1b;
+  }
+}

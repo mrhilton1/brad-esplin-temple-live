@@ -3,7 +3,7 @@ import {
   Calendar, Clock, Users, Check, AlertTriangle, Trash2, RefreshCw, 
   Search, ShieldAlert, ArrowRight, UserCheck, AlertCircle, Info,
   CheckCircle, Plus, Sparkles, MapPin, Bookmark, X, User, ChevronDown,
-  CheckSquare, Square, Filter, MessageSquare, Copy, Edit3, Save
+  CheckSquare, Square, Filter, MessageSquare, Copy, Edit3, Save, Printer
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -322,6 +322,7 @@ export default function EventMatcher() {
   const [dateRangeEnd, setDateRangeEnd] = useState<Date | null>(null);
   const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>("weekends");
   const [expandedEventIds, setExpandedEventIds] = useState<Record<string, boolean>>({});
+  const [selectedPrintEventIds, setSelectedPrintEventIds] = useState<Set<string>>(new Set());
   const [syncStatus, setSyncStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSyncingStats, setIsSyncingStats] = useState(false);
 
@@ -1161,8 +1162,138 @@ export default function EventMatcher() {
     return matchesSearch && matchesDate && matchesStatus;
   }).sort(compareEventsByDateTime);
 
+  const selectedPrintEvents = filteredEvents.filter(event => selectedPrintEventIds.has(event.id));
+
+  const getContactNameById = (contactId?: string): string => {
+    if (!contactId) return "Unassigned";
+    return contacts.find(c => c.id === contactId)?.["Worker Name"] || "Unassigned";
+  };
+
+  const getGuestNamesList = (guests: string): string[] => {
+    return guests.split(";").map(g => g.trim()).filter(Boolean);
+  };
+
+  const getLongDateText = (dateStr: string): string => {
+    const parsed = parseDateString(dateStr);
+    if (!parsed) return dateStr;
+    return parsed.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const togglePrintSelection = (eventId: string) => {
+    setSelectedPrintEventIds(prev => {
+      const next = new Set(prev);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllVisibleForPrint = () => {
+    setSelectedPrintEventIds(new Set(filteredEvents.map(event => event.id)));
+  };
+
+  const clearPrintSelection = () => {
+    setSelectedPrintEventIds(new Set());
+  };
+
+  const handlePrintSelectedEvents = () => {
+    if (selectedPrintEvents.length === 0) return;
+    window.print();
+  };
+
   return (
-    <div className="w-full">
+    <div className="w-full event-matcher-root">
+
+      <div className="event-print-sheet hidden">
+        <div className="event-print-cover">
+          <h1>Temple Event Assignments</h1>
+          <p>{selectedPrintEvents.length} selected event{selectedPrintEvents.length === 1 ? "" : "s"}</p>
+        </div>
+        {selectedPrintEvents.map((event) => {
+          const lsgArrival = calculateArrivalTime(event.time, 90);
+          const guestArrival = calculateArrivalTime(event.time, 75);
+          const csgArrival = calculateArrivalTime(event.time, 60);
+          const guestNames = getGuestNamesList(event.guests);
+          return (
+            <section className="event-print-card" key={event.id}>
+              <header className="event-print-header">
+                <h2>{getEventTitle(event.guests, event.date, event.time)}</h2>
+                <div className="event-print-meta">
+                  <span>{getLongDateText(event.date)}</span>
+                  <span>{event.time}</span>
+                  <span>{event.room || "Room not set"}</span>
+                </div>
+              </header>
+
+              <div className="event-print-grid">
+                <div className="event-print-panel">
+                  <div className="event-print-room">
+                    <span>Room:</span>
+                    <strong>{event.room || "Unspecified"}</strong>
+                  </div>
+
+                  <div className="event-print-section">
+                    <h3>LSG Arrival: <strong>{lsgArrival || "--"}</strong></h3>
+                    <div className="event-print-worker-row">
+                      <span>Bride:</span>
+                      <strong>{getContactNameById(event.assignedLsgId)}</strong>
+                      <em>{event.lsgConfirmed ? "Confirmed" : "Not confirmed"}</em>
+                    </div>
+                    <div className="event-print-worker-row">
+                      <span>Groom:</span>
+                      <strong>{getContactNameById(event.assignedGroomLsgId)}</strong>
+                      <em>{event.groomLsgConfirmed ? "Confirmed" : "Not confirmed"}</em>
+                    </div>
+                  </div>
+
+                  <div className="event-print-section">
+                    <h3>CSG Arrival: <strong>{csgArrival || "--"}</strong></h3>
+                    <div className="event-print-worker-row">
+                      <span>Worker:</span>
+                      <strong>{getContactNameById(event.assignedCsgId)}</strong>
+                      <em>{event.csgConfirmed ? "Confirmed" : "Not confirmed"}</em>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="event-print-panel event-print-details">
+                  <div className="event-print-arrival">Guests Arrival: <strong>{guestArrival || "--"}</strong></div>
+                  <div>
+                    <span className="event-print-label">Event Type</span>
+                    <strong>{event.type || "Unspecified"}</strong>
+                  </div>
+                  <div>
+                    <span className="event-print-label">Guest Names</span>
+                    {guestNames.length > 0 ? (
+                      <ul>
+                        {guestNames.map((name, idx) => (
+                          <li key={`${event.id}-guest-${idx}`}>{name}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>None listed</p>
+                    )}
+                  </div>
+                  {event.status === "changed" && (
+                    <p className="event-print-note">Dates/times altered. Reconfirm availability with the LSG.</p>
+                  )}
+                  {event.status === "deleted" && (
+                    <p className="event-print-note event-print-note-danger">This event is marked deleted/cancelled.</p>
+                  )}
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
 
       {/* Sync Status Banner */}
       <AnimatePresence>
@@ -1408,6 +1539,43 @@ export default function EventMatcher() {
         </div>
       </div>
 
+      <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-0.5 pt-4">
+        <div className="text-xs text-slate-400 font-mono">
+          <span className="font-bold text-slate-200">{selectedPrintEvents.length}</span> selected for print
+          <span className="text-slate-600 mx-2">|</span>
+          <span>{filteredEvents.length} visible</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={selectAllVisibleForPrint}
+            disabled={filteredEvents.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-slate-200 transition-all cursor-pointer"
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            Select Visible
+          </button>
+          <button
+            type="button"
+            onClick={clearPrintSelection}
+            disabled={selectedPrintEvents.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-slate-200 transition-all cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handlePrintSelectedEvents}
+            disabled={selectedPrintEvents.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-indigo-500/40 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:border-indigo-900 disabled:text-slate-500 disabled:cursor-not-allowed text-xs font-bold text-white transition-all cursor-pointer shadow-md"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Print Selected
+          </button>
+        </div>
+      </div>
+
       <div className="space-y-6 pt-6 px-0.5">
         {/* Main Events Grid / Card Layout */}
       {isLoading ? (
@@ -1582,6 +1750,18 @@ export default function EventMatcher() {
                   className="px-4 py-3 bg-white/3 border-b border-white/5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 cursor-pointer hover:bg-white/5 select-none transition-colors"
                 >
                   <div className="text-xs sm:text-sm font-bold text-slate-100 font-mono tracking-tight flex-1 truncate flex items-center gap-1.5 flex-wrap">
+                    <label
+                      onClick={(e) => e.stopPropagation()}
+                      className="mr-1 inline-flex items-center justify-center cursor-pointer"
+                      title="Select this event for printing"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPrintEventIds.has(event.id)}
+                        onChange={() => togglePrintSelection(event.id)}
+                        className="w-4 h-4 rounded border-white/20 bg-slate-900/80 text-indigo-600 focus:ring-indigo-400 focus:ring-offset-0 cursor-pointer"
+                      />
+                    </label>
                     <span className="text-white font-sans">{namePart} Sealing</span>
                     <span className="text-slate-600">|</span>
                     <span className="text-slate-300">{datePart}</span>
@@ -1646,14 +1826,12 @@ export default function EventMatcher() {
                           {/* Section 1: LSG Arrival Section */}
                           <div className="space-y-1.5">
                             {/* Header: LSG Arrival */}
-                            <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center justify-between">
+                            <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center">
                               <div className="text-xs font-bold font-mono flex items-center gap-2 text-slate-200">
                                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
                                 <span>LSG Arrival:</span>
+                                <span className="text-indigo-300">{lsgArrival || "—"}</span>
                               </div>
-                              <span className="text-xs font-bold font-mono text-indigo-300">
-                                {lsgArrival || "—"}
-                              </span>
                             </div>
 
                             {/* Indented Bride & Groom selectors */}
@@ -1737,14 +1915,12 @@ export default function EventMatcher() {
                           {/* Section 2: CSG Arrival Section */}
                           <div className="space-y-1.5 pt-1">
                             {/* Header: CSG Arrival */}
-                            <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center justify-between">
+                            <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center">
                               <div className="text-xs font-bold font-mono flex items-center gap-2 text-slate-200">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                                 <span>CSG Arrival:</span>
+                                <span className="text-emerald-300">{csgArrival || "—"}</span>
                               </div>
-                              <span className="text-xs font-bold font-mono text-emerald-300">
-                                {csgArrival || "—"}
-                              </span>
                             </div>
 
                             {/* Indented CSG selector */}
