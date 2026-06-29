@@ -88,6 +88,35 @@ const cleanEmailValue = (value: string): string => {
     .trim();
 };
 
+const slugifyKeyPart = (value: string): string => {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+};
+
+const getEventSlotId = (date: string, time: string, room: string, guests: string): string => {
+  const dateKey = slugifyKeyPart(date);
+  const timeKey = slugifyKeyPart(time);
+  const roomKey = slugifyKeyPart(room);
+
+  if (dateKey && timeKey && roomKey) {
+    return `event_slot_${dateKey}_${timeKey}_${roomKey}`;
+  }
+
+  return `event_${slugifyKeyPart(guests)}`;
+};
+
+const eventSlotKey = (event: Record<string, any>): string => {
+  return [
+    slugifyKeyPart(event.date || ""),
+    slugifyKeyPart(event.time || ""),
+    slugifyKeyPart(event.room || ""),
+  ].join("|");
+};
+
 const getEventDecisionTitle = (event: Record<string, any>, fallback = "Event") => {
   return event.guests || fallback;
 };
@@ -173,10 +202,16 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
 
       // Fetch existing events if template is event_schedule
       const existingEvents: Record<string, any> = {};
+      const existingEventsBySlot: Record<string, any> = {};
       if (sheetPreset === "event_schedule") {
         const eventsSnapshot = await getDocs(collection(db, "events"));
         eventsSnapshot.forEach(docSnap => {
-          existingEvents[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+          const eventData = { id: docSnap.id, ...docSnap.data() };
+          existingEvents[docSnap.id] = eventData;
+          const slotKey = eventSlotKey(eventData);
+          if (!existingEventsBySlot[slotKey]) {
+            existingEventsBySlot[slotKey] = eventData;
+          }
         });
       }
 
@@ -264,15 +299,18 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             }
           }
 
-          const eventId = "event_" + guestsVal.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+          const eventId = getEventSlotId(dateVal, timeVal, roomVal, guestsVal);
           allIncomingDocIds.add(eventId);
 
-          const existingEvent = existingEvents[eventId];
-          const eventRef = doc(db, "events", eventId);
+          const slotKey = eventSlotKey({ date: dateVal, time: timeVal, room: roomVal });
+          const existingEvent = existingEvents[eventId] || existingEventsBySlot[slotKey];
+          const targetEventId = existingEvent?.id || eventId;
+          allIncomingDocIds.add(targetEventId);
+          const eventRef = doc(db, "events", targetEventId);
 
           if (!existingEvent) {
             await setDoc(eventRef, {
-              id: eventId,
+              id: targetEventId,
               date: dateVal,
               time: timeVal,
               room: roomVal,
