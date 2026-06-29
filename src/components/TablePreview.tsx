@@ -97,18 +97,6 @@ const slugifyKeyPart = (value: string): string => {
     .toLowerCase();
 };
 
-const getEventSlotId = (date: string, time: string, room: string, guests: string): string => {
-  const dateKey = slugifyKeyPart(date);
-  const timeKey = slugifyKeyPart(time);
-  const roomKey = slugifyKeyPart(room);
-
-  if (dateKey && timeKey && roomKey) {
-    return `event_slot_${dateKey}_${timeKey}_${roomKey}`;
-  }
-
-  return `event_${slugifyKeyPart(guests)}`;
-};
-
 const eventSlotKey = (event: Record<string, any>): string => {
   return [
     slugifyKeyPart(event.date || ""),
@@ -299,12 +287,9 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             }
           }
 
-          const eventId = getEventSlotId(dateVal, timeVal, roomVal, guestsVal);
-          allIncomingDocIds.add(eventId);
-
           const slotKey = eventSlotKey({ date: dateVal, time: timeVal, room: roomVal });
-          const existingEvent = existingEvents[eventId] || existingEventsBySlot[slotKey];
-          const targetEventId = existingEvent?.id || eventId;
+          const existingEvent = existingEventsBySlot[slotKey];
+          const targetEventId = existingEvent?.id || crypto.randomUUID();
           allIncomingDocIds.add(targetEventId);
           const eventRef = doc(db, "events", targetEventId);
 
@@ -339,10 +324,10 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
                 type: typeVal,
                 guests: guestsVal,
               };
-              const conflictId = `event_conflict_${eventId}_details`;
+              const conflictId = `event_conflict_${targetEventId}_details`;
               await setDoc(doc(db, "crm_sync_conflicts", conflictId), {
                 id: conflictId,
-                contactId: eventId,
+                contactId: targetEventId,
                 workerName: getEventDecisionTitle(existingEvent, guestsVal),
                 field: "Event Details",
                 existingValue: JSON.stringify(getComparableEventDetails(existingEvent)),
