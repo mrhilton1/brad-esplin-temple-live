@@ -88,6 +88,16 @@ const eventNeedsCsg = (event: EventRecord): boolean => {
   );
 };
 
+const eventNeedsReminder = (event: EventRecord): boolean => {
+  if (event.completed || event.status === "deleted") return false;
+
+  return !!(
+    (event.assignedLsgId && !event.lsgReminded) ||
+    (event.assignedGroomLsgId && !event.groomLsgReminded) ||
+    (event.assignedCsgId && !event.csgReminded)
+  );
+};
+
 const eventHasAssignedWorkers = (event: EventRecord): boolean => {
   return !!(event.assignedLsgId || event.assignedGroomLsgId || event.assignedCsgId);
 };
@@ -1244,6 +1254,7 @@ export default function EventMatcher() {
     { id: "past", label: "Past (History)" },
     { id: "assigned", label: "🟢 Covered (Confirmed)" },
     { id: "awaiting_confirmation", label: "🟡 Awaiting Confirmation" },
+    { id: "needs_reminder", label: "🟡 Needs Reminder" },
     { id: "lsg_needed", label: "🟡 LSG Needed" },
     { id: "csg_needed", label: "🟡 CSG Needed" },
     { id: "unassigned", label: "🟡 Pending Assignments" },
@@ -1304,6 +1315,8 @@ export default function EventMatcher() {
       matchesStatus = !!(e.assignedLsgId && e.assignedGroomLsgId && e.assignedCsgId && e.lsgConfirmed && e.groomLsgConfirmed && e.csgConfirmed && !e.completed && e.status !== "deleted");
     } else if (statusFilter === "awaiting_confirmation") {
       matchesStatus = !!(e.assignedLsgId && e.assignedGroomLsgId && e.assignedCsgId && !(e.lsgConfirmed && e.groomLsgConfirmed && e.csgConfirmed) && !e.completed && e.status !== "deleted");
+    } else if (statusFilter === "needs_reminder") {
+      matchesStatus = eventNeedsReminder(e);
     } else if (statusFilter === "lsg_needed") {
       matchesStatus = eventNeedsLsg(e);
     } else if (statusFilter === "csg_needed") {
