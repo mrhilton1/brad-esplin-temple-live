@@ -208,6 +208,8 @@ interface TextTemplate {
   updatedAt?: any;
 }
 
+type ManualEventStatus = "covered" | "awaiting_confirmation" | "pending" | "changed" | "deleted" | "completed";
+
 interface SearchableWorkerSelectProps {
   value: string;
   onChange: (id: string) => void;
@@ -326,6 +328,7 @@ export default function EventMatcher() {
   const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>("weekends");
   const [expandedEventIds, setExpandedEventIds] = useState<Record<string, boolean>>({});
   const [selectedPrintEventIds, setSelectedPrintEventIds] = useState<Set<string>>(new Set());
+  const [openStatusEventId, setOpenStatusEventId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSyncingStats, setIsSyncingStats] = useState(false);
 
@@ -945,6 +948,119 @@ export default function EventMatcher() {
       setSyncStatus({
         type: "error",
         message: "Failed to update deleted event status."
+      });
+    }
+  };
+
+  const reverseCompletedEventStats = async (event: EventRecord) => {
+    const statAdjustments = [
+      event.assignedLsgId ? { contactId: event.assignedLsgId, totalField: "Total LSG" } : null,
+      event.assignedGroomLsgId ? { contactId: event.assignedGroomLsgId, totalField: "Total LSG" } : null,
+      event.assignedCsgId ? { contactId: event.assignedCsgId, totalField: "Total CSG" } : null,
+    ].filter(Boolean) as Array<{ contactId: string; totalField: "Total LSG" | "Total CSG" }>;
+
+    for (const adjustment of statAdjustments) {
+      const workerRef = doc(db, "crm_contacts", adjustment.contactId);
+      const workerSnap = await getDoc(workerRef);
+      if (!workerSnap.exists()) continue;
+
+      const worker = workerSnap.data();
+      const currentTotal = parseInt(worker[adjustment.totalField] || "0", 10) || 0;
+      await updateDoc(workerRef, {
+        [adjustment.totalField]: Math.max(0, currentTotal - 1).toString(),
+        updatedAt: serverTimestamp()
+      });
+    }
+  };
+
+  const handleManualStatusChange = async (event: EventRecord, nextStatus: ManualEventStatus) => {
+    setOpenStatusEventId(null);
+
+    if (nextStatus === "completed") {
+      if (event.completed) return;
+      await handleCompleteEvent(event);
+      return;
+    }
+
+    try {
+      const wasCompleted = !!event.completed;
+      const updates: Record<string, any> = {
+        completed: false,
+        completedAt: null,
+        updatedAt: serverTimestamp()
+      };
+
+      let localPatch: Partial<EventRecord> = {
+        completed: false,
+        completedAt: null
+      };
+
+      if (nextStatus === "covered") {
+        updates.status = "assigned";
+        localPatch.status = "assigned";
+
+        if (event.assignedLsgId) {
+          updates.lsgConfirmed = true;
+          localPatch.lsgConfirmed = true;
+        }
+        if (event.assignedGroomLsgId) {
+          updates.groomLsgConfirmed = true;
+          localPatch.groomLsgConfirmed = true;
+        }
+        if (event.assignedCsgId) {
+          updates.csgConfirmed = true;
+          localPatch.csgConfirmed = true;
+        }
+      } else if (nextStatus === "awaiting_confirmation") {
+        updates.status = "assigned";
+        localPatch.status = "assigned";
+
+        if (event.assignedLsgId) {
+          updates.lsgConfirmed = false;
+          localPatch.lsgConfirmed = false;
+        }
+        if (event.assignedGroomLsgId) {
+          updates.groomLsgConfirmed = false;
+          localPatch.groomLsgConfirmed = false;
+        }
+        if (event.assignedCsgId) {
+          updates.csgConfirmed = false;
+          localPatch.csgConfirmed = false;
+        }
+      } else if (nextStatus === "pending") {
+        updates.status = "unassigned";
+        localPatch.status = "unassigned";
+      } else {
+        updates.status = nextStatus;
+        localPatch.status = nextStatus;
+      }
+
+      await updateDoc(doc(db, "events", event.id), updates);
+
+      if (wasCompleted) {
+        await reverseCompletedEventStats(event);
+      }
+
+      setSessionEditedIds(prev => {
+        const next = new Set(prev);
+        next.add(event.id);
+        return next;
+      });
+
+      setEvents(prev => prev.map(e => e.id === event.id ? { ...e, ...localPatch } : e));
+
+      setSyncStatus({
+        type: "success",
+        message: wasCompleted
+          ? "Event status updated and the completed-event worker totals were decremented for assigned workers."
+          : "Event status updated."
+      });
+      setTimeout(() => setSyncStatus(null), wasCompleted ? 6000 : 3000);
+    } catch (err) {
+      console.error("Failed to update event status:", err);
+      setSyncStatus({
+        type: "error",
+        message: "Failed to update event status."
       });
     }
   };
@@ -1693,6 +1809,14 @@ export default function EventMatcher() {
                   <span>DETAILS CHANGED (RECONFIRM)</span>
                 </div>
               );
+            } else if (event.status === "unassigned" && event.assignedLsgId && event.assignedGroomLsgId && event.assignedCsgId) {
+              borderClass = "border-amber-500/30 bg-amber-500/3";
+              statusBadge = (
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-500/35 rounded text-[10px] font-bold text-amber-400 uppercase tracking-wider font-mono">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>PENDING ASSIGNMENTS</span>
+                </div>
+              );
             } else if (event.assignedLsgId && event.assignedGroomLsgId && event.assignedCsgId) {
               const allConfirmed = !!(event.lsgConfirmed && event.groomLsgConfirmed && event.csgConfirmed);
               if (allConfirmed) {
@@ -1882,8 +2006,56 @@ export default function EventMatcher() {
                       </div>
                     )}
                   </div>
-                  <div className="shrink-0 flex items-center justify-end gap-2">
-                    {statusBadge}
+                  <div className="shrink-0 relative flex items-center justify-end gap-2">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenStatusEventId(prev => prev === event.id ? null : event.id);
+                      }}
+                      title="Change event status"
+                      className="cursor-pointer rounded transition-transform hover:scale-[1.02] focus-within:ring-2 focus-within:ring-indigo-400"
+                    >
+                      {statusBadge}
+                    </div>
+                    {openStatusEventId === event.id && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40 cursor-default"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenStatusEventId(null);
+                          }}
+                        />
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-6 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-white/15 bg-slate-950 shadow-2xl"
+                        >
+                          {[
+                            { id: "covered" as ManualEventStatus, label: "Covered (Confirmed)", tone: "text-emerald-300" },
+                            { id: "awaiting_confirmation" as ManualEventStatus, label: "Awaiting Confirmation", tone: "text-amber-300" },
+                            { id: "pending" as ManualEventStatus, label: "Pending Assignments", tone: "text-amber-300" },
+                            { id: "changed" as ManualEventStatus, label: "Details Changed", tone: "text-amber-300" },
+                            { id: "deleted" as ManualEventStatus, label: "Deleted", tone: "text-red-300" },
+                            { id: "completed" as ManualEventStatus, label: "Completed & Logged", tone: "text-emerald-300" }
+                          ].map(option => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => handleManualStatusChange(event, option.id)}
+                              className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-bold uppercase tracking-wider hover:bg-indigo-600/30 ${option.tone}`}
+                            >
+                              <span>{option.label}</span>
+                              {((option.id === "completed" && event.completed) ||
+                                (option.id === "changed" && event.status === "changed" && !event.completed) ||
+                                (option.id === "deleted" && event.status === "deleted" && !event.completed) ||
+                                (option.id === "pending" && event.status === "unassigned" && !event.completed)) && (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                     <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${expandedEventIds[event.id] ? "rotate-180" : ""}`} />
                   </div>
                 </div>
