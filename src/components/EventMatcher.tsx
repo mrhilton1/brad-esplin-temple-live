@@ -195,6 +195,9 @@ interface EventRecord {
   lsgConfirmed?: boolean;
   groomLsgConfirmed?: boolean;
   csgConfirmed?: boolean;
+  lsgReminded?: boolean;
+  groomLsgReminded?: boolean;
+  csgReminded?: boolean;
 }
 
 interface TextTemplate {
@@ -650,15 +653,19 @@ export default function EventMatcher() {
       const eventRef = doc(db, "events", eventId);
       let field: "assignedLsgId" | "assignedGroomLsgId" | "assignedCsgId";
       let confirmField: "lsgConfirmed" | "groomLsgConfirmed" | "csgConfirmed";
+      let remindedField: "lsgReminded" | "groomLsgReminded" | "csgReminded";
       if (role === "lsg") {
         field = "assignedLsgId";
         confirmField = "lsgConfirmed";
+        remindedField = "lsgReminded";
       } else if (role === "groom_lsg") {
         field = "assignedGroomLsgId";
         confirmField = "groomLsgConfirmed";
+        remindedField = "groomLsgReminded";
       } else {
         field = "assignedCsgId";
         confirmField = "csgConfirmed";
+        remindedField = "csgReminded";
       }
       
       // Find the event
@@ -666,8 +673,9 @@ export default function EventMatcher() {
       if (eventIndex === -1) return;
       const updatedEvent = { ...events[eventIndex] };
       updatedEvent[field] = contactId;
-      // Reset confirmation if changing assignment
+      // Reset communication states if changing assignment.
       updatedEvent[confirmField] = false;
+      updatedEvent[remindedField] = false;
 
       // Automatically compute status based on user's custom pending assignment logic:
       // All three assigned = Covered (Green)
@@ -683,6 +691,7 @@ export default function EventMatcher() {
       await updateDoc(eventRef, {
         [field]: contactId,
         [confirmField]: false,
+        [remindedField]: false,
         status: updatedEvent.status,
         updatedAt: serverTimestamp()
       });
@@ -742,6 +751,45 @@ export default function EventMatcher() {
       setEvents(nextEvents);
     } catch (err) {
       console.error("Failed to toggle confirmation status:", err);
+    }
+  };
+
+  // Toggle reminder status in Supabase
+  const handleToggleReminder = async (eventId: string, role: "lsg" | "groom_lsg" | "csg", currentValue: boolean) => {
+    try {
+      const eventRef = doc(db, "events", eventId);
+      let remindedField: "lsgReminded" | "groomLsgReminded" | "csgReminded";
+      if (role === "lsg") {
+        remindedField = "lsgReminded";
+      } else if (role === "groom_lsg") {
+        remindedField = "groomLsgReminded";
+      } else {
+        remindedField = "csgReminded";
+      }
+
+      const newValue = !currentValue;
+
+      const eventIndex = events.findIndex(e => e.id === eventId);
+      if (eventIndex === -1) return;
+      const updatedEvent = { ...events[eventIndex] };
+      updatedEvent[remindedField] = newValue;
+
+      await updateDoc(eventRef, {
+        [remindedField]: newValue,
+        updatedAt: serverTimestamp()
+      });
+
+      setSessionEditedIds(prev => {
+        const next = new Set(prev);
+        next.add(eventId);
+        return next;
+      });
+
+      const nextEvents = [...events];
+      nextEvents[eventIndex] = updatedEvent;
+      setEvents(nextEvents);
+    } catch (err) {
+      console.error("Failed to toggle reminder status:", err);
     }
   };
 
@@ -1706,6 +1754,14 @@ export default function EventMatcher() {
             const lsgCovered = !!event.assignedLsgId;
             const groomLsgCovered = !!event.assignedGroomLsgId;
             const csgCovered = !!event.assignedCsgId;
+            const assignedRoleStates = [
+              lsgCovered ? { confirmed: !!event.lsgConfirmed, reminded: !!event.lsgReminded } : null,
+              groomLsgCovered ? { confirmed: !!event.groomLsgConfirmed, reminded: !!event.groomLsgReminded } : null,
+              csgCovered ? { confirmed: !!event.csgConfirmed, reminded: !!event.csgReminded } : null,
+            ].filter(Boolean) as Array<{ confirmed: boolean; reminded: boolean }>;
+            const hasAssignedWorkers = assignedRoleStates.length > 0;
+            const allAssignedConfirmed = hasAssignedWorkers && assignedRoleStates.every(role => role.confirmed);
+            const allAssignedReminded = hasAssignedWorkers && assignedRoleStates.every(role => role.reminded);
 
             // Render guest names list line by line cleanly
             const renderGuestNames = () => {
@@ -1809,6 +1865,22 @@ export default function EventMatcher() {
                     >
                       <MessageSquare className="w-3.5 h-3.5" />
                     </button>
+                    {hasAssignedWorkers && (
+                      <div className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-black uppercase leading-none">
+                        <span
+                          title="All assigned workers confirmed"
+                          className={allAssignedConfirmed ? "text-emerald-400" : "text-slate-500"}
+                        >
+                          C
+                        </span>
+                        <span
+                          title="All assigned workers reminded"
+                          className={allAssignedReminded ? "text-emerald-400" : "text-slate-500"}
+                        >
+                          R
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="shrink-0 flex items-center justify-end gap-2">
                     {statusBadge}
@@ -1848,7 +1920,7 @@ export default function EventMatcher() {
                             {/* Indented Bride & Groom selectors */}
                             <div className="pl-3 space-y-1.5">
                               {/* Bride Row */}
-                              <div className="flex items-center gap-2 w-full">
+                              <div className="flex flex-wrap items-center gap-2 w-full">
                                 <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Bride:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedLsgId || ""}
@@ -1882,10 +1954,24 @@ export default function EventMatcher() {
                                     </span>
                                   </label>
                                 )}
+                                {lsgCovered && (
+                                  <label className="shrink-0 flex items-center gap-1 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!event.lsgReminded}
+                                      onChange={() => handleToggleReminder(event.id, "lsg", !!event.lsgReminded)}
+                                      disabled={event.status === "deleted" || event.completed}
+                                      className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-emerald-600 focus:ring-0 cursor-pointer disabled:opacity-40"
+                                    />
+                                    <span className={`text-[10px] font-mono uppercase tracking-wider font-bold ${event.lsgReminded ? "text-emerald-400" : "text-slate-500"}`}>
+                                      Reminded
+                                    </span>
+                                  </label>
+                                )}
                               </div>
 
                               {/* Groom Row */}
-                              <div className="flex items-center gap-2 w-full">
+                              <div className="flex flex-wrap items-center gap-2 w-full">
                                 <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Groom:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedGroomLsgId || ""}
@@ -1919,6 +2005,20 @@ export default function EventMatcher() {
                                     </span>
                                   </label>
                                 )}
+                                {groomLsgCovered && (
+                                  <label className="shrink-0 flex items-center gap-1 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!event.groomLsgReminded}
+                                      onChange={() => handleToggleReminder(event.id, "groom_lsg", !!event.groomLsgReminded)}
+                                      disabled={event.status === "deleted" || event.completed}
+                                      className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-emerald-600 focus:ring-0 cursor-pointer disabled:opacity-40"
+                                    />
+                                    <span className={`text-[10px] font-mono uppercase tracking-wider font-bold ${event.groomLsgReminded ? "text-emerald-400" : "text-slate-500"}`}>
+                                      Reminded
+                                    </span>
+                                  </label>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1937,7 +2037,7 @@ export default function EventMatcher() {
                             {/* Indented CSG selector */}
                             <div className="pl-3 space-y-1.5">
                               {/* Worker Row */}
-                              <div className="flex items-center gap-2 w-full">
+                              <div className="flex flex-wrap items-center gap-2 w-full">
                                 <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Worker:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedCsgId || ""}
@@ -1968,6 +2068,20 @@ export default function EventMatcher() {
                                     />
                                     <span className={`text-[10px] font-mono uppercase tracking-wider font-bold ${event.csgConfirmed ? "text-indigo-400" : "text-slate-500"}`}>
                                       Confirmed
+                                    </span>
+                                  </label>
+                                )}
+                                {csgCovered && (
+                                  <label className="shrink-0 flex items-center gap-1 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!event.csgReminded}
+                                      onChange={() => handleToggleReminder(event.id, "csg", !!event.csgReminded)}
+                                      disabled={event.status === "deleted" || event.completed}
+                                      className="w-3.5 h-3.5 rounded border-white/20 bg-white/5 text-emerald-600 focus:ring-0 cursor-pointer disabled:opacity-40"
+                                    />
+                                    <span className={`text-[10px] font-mono uppercase tracking-wider font-bold ${event.csgReminded ? "text-emerald-400" : "text-slate-500"}`}>
+                                      Reminded
                                     </span>
                                   </label>
                                 )}
