@@ -1691,8 +1691,19 @@ export default function EventMatcher() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search rooms, types, guests or workers..."
-            className="w-full pl-10 pr-4 py-2.5 border border-white/10 bg-slate-900/50 backdrop-blur-xs text-sm rounded-xl focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
+            className="w-full pl-10 pr-10 py-2.5 border border-white/10 bg-slate-900/50 backdrop-blur-xs text-sm rounded-xl focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
           />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-500 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+              aria-label="Clear event search"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Controls container (Calendar picker and Filter dropdown) */}

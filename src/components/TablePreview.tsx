@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { 
   Download, Edit2, Check, Trash2, Plus, Search, HelpCircle, 
-  Settings, Columns, RefreshCw, FileDown, CheckCircle2, Database
+  Settings, Columns, RefreshCw, FileDown, CheckCircle2, Database, X
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { ExtractedTableData } from "../types";
@@ -1170,8 +1170,19 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search extracted columns..."
-                className="w-full pl-9 pr-4 py-2 border border-white/10 glass-input text-sm focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
+                className="w-full pl-9 pr-9 py-2 border border-white/10 glass-input text-sm focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400"
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-500 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                  aria-label="Clear extracted columns search"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {/* Quick columns modification / addition actions */}
