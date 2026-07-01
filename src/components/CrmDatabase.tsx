@@ -471,6 +471,41 @@ const parseConflictJson = (value: string): Record<string, any> | null => {
   }
 };
 
+const normalizeEventText = (value: string): string => {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*;\s*/g, "; ")
+    .replace(/\s*,\s*/g, ", ")
+    .trim()
+    .toLowerCase();
+};
+
+const getEventFieldDiffs = (existingValue: string, incomingValue: string) => {
+  const existing = parseConflictJson(existingValue);
+  const incoming = parseConflictJson(incomingValue);
+  if (!existing || !incoming || existing.action || incoming.action) return [];
+
+  const fields = (["date", "time", "room", "type", "guests"] as const);
+  return fields
+    .filter(field => {
+      if (Array.isArray(incoming.changedFields) && incoming.changedFields.length > 0) {
+        return incoming.changedFields.includes(field);
+      }
+      if (Array.isArray(existing.changedFields) && existing.changedFields.length > 0) {
+        return existing.changedFields.includes(field);
+      }
+      return normalizeEventText(existing[field] || "") !== normalizeEventText(incoming[field] || "");
+    })
+    .map(field => ({
+      field,
+      label: field.charAt(0).toUpperCase() + field.slice(1),
+      existing: existing[field] || "",
+      incoming: incoming[field] || "",
+    }));
+};
+
 const formatEventConflictValue = (value: string) => {
   const parsed = parseConflictJson(value);
   if (!parsed) return value;
@@ -1989,8 +2024,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
-                  {pendingConflicts.map((conflict) => (
-                    <div 
+                  {pendingConflicts.map((conflict) => {
+                    const eventFieldDiffs = isEventConflict(conflict) && conflict.field === "Event Details"
+                      ? getEventFieldDiffs(conflict.existingValue, conflict.incomingValue)
+                      : [];
+
+                    return (
+                    <div
                       key={conflict.id}
                       className="p-5 bg-white/5 border border-white/10 rounded-xl space-y-4 hover:border-white/20 transition-all shadow-md relative overflow-hidden"
                     >
@@ -2021,29 +2061,66 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         </span>
                       </div>
 
-                      {/* Side by side comparison */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/20 p-4 rounded-lg border border-white/5 text-sm">
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Existing CRM Value:</span>
-                          <span className="font-medium text-slate-300 whitespace-pre-wrap">
-                            {conflict.existingValue ? (
-                              isEventConflict(conflict) ? formatEventConflictValue(conflict.existingValue) : conflict.existingValue
-                            ) : (
-                              <span className="text-slate-600 italic text-xs">empty</span>
-                            )}
-                          </span>
+                      {eventFieldDiffs.length > 0 ? (
+                        <div className="bg-black/20 p-4 rounded-lg border border-white/5 text-sm space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Changed fields:</span>
+                            {eventFieldDiffs.map(diff => (
+                              <span
+                                key={diff.field}
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/25"
+                              >
+                                {diff.label}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="space-y-2">
+                            {eventFieldDiffs.map(diff => (
+                              <div key={diff.field} className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr] gap-2 rounded-lg border border-white/5 bg-white/[0.03] p-3">
+                                <div className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">{diff.label}</div>
+                                <div className="space-y-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Current</span>
+                                  <span className="font-medium text-slate-300 whitespace-pre-wrap">{diff.existing || <span className="text-slate-600 italic text-xs">empty</span>}</span>
+                                </div>
+                                <div className="space-y-1 sm:border-l sm:border-white/5 sm:pl-3">
+                                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Incoming</span>
+                                  <span className="font-bold text-white whitespace-pre-wrap">{diff.incoming || <span className="text-slate-600 italic text-xs">empty</span>}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="space-y-1 sm:border-l sm:border-white/5 sm:pl-4">
-                          <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Incoming PDF Value:</span>
-                          <span className="font-bold text-white whitespace-pre-wrap">
-                            {conflict.incomingValue ? (
-                              isEventConflict(conflict) ? formatEventConflictValue(conflict.incomingValue) : conflict.incomingValue
-                            ) : (
-                              <span className="text-slate-600 italic text-xs">empty</span>
-                            )}
-                          </span>
+                      ) : isEventConflict(conflict) && conflict.field === "Event Details" ? (
+                        <div className="bg-black/20 p-4 rounded-lg border border-amber-500/20 text-sm space-y-2">
+                          <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block">No semantic field differences detected</span>
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            This pending item appears to have been created by formatting differences from an earlier import, such as line breaks, spacing, or punctuation spacing. Dismiss it to keep the current event.
+                          </p>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-black/20 p-4 rounded-lg border border-white/5 text-sm">
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Existing CRM Value:</span>
+                            <span className="font-medium text-slate-300 whitespace-pre-wrap">
+                              {conflict.existingValue ? (
+                                isEventConflict(conflict) ? formatEventConflictValue(conflict.existingValue) : conflict.existingValue
+                              ) : (
+                                <span className="text-slate-600 italic text-xs">empty</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="space-y-1 sm:border-l sm:border-white/5 sm:pl-4">
+                            <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">Incoming PDF Value:</span>
+                            <span className="font-bold text-white whitespace-pre-wrap">
+                              {conflict.incomingValue ? (
+                                isEventConflict(conflict) ? formatEventConflictValue(conflict.incomingValue) : conflict.incomingValue
+                              ) : (
+                                <span className="text-slate-600 italic text-xs">empty</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Actions */}
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-1 border-t border-white/5 mt-2">
@@ -2087,7 +2164,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         </div>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>

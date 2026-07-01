@@ -117,6 +117,23 @@ const getComparableEventDetails = (event: Record<string, any>) => ({
   guests: event.guests || "",
 });
 
+const normalizeEventText = (value: string): string => {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*;\s*/g, "; ")
+    .replace(/\s*,\s*/g, ", ")
+    .trim()
+    .toLowerCase();
+};
+
+const getChangedEventFields = (existingEvent: Record<string, any>, incomingEvent: Record<string, any>) => {
+  return (["date", "time", "room", "type", "guests"] as const).filter(field => {
+    return normalizeEventText(existingEvent[field] || "") !== normalizeEventText(incomingEvent[field] || "");
+  });
+};
+
 const getEventDateRangeLabel = (start: Date | null, end: Date | null) => {
   if (!start || !end) return "the uploaded schedule date range";
   return `${formatDateForInput(start.toISOString())} through ${formatDateForInput(end.toISOString())}`;
@@ -310,28 +327,30 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             });
             savedCount++;
           } else {
-            const isChanged = 
-              (existingEvent.date !== dateVal) || 
-              (existingEvent.time !== timeVal) || 
-              (existingEvent.room !== roomVal) || 
-              (existingEvent.type !== typeVal);
+            const incomingEvent = {
+              date: dateVal,
+              time: timeVal,
+              room: roomVal,
+              type: typeVal,
+              guests: guestsVal,
+            };
+            const changedFields = getChangedEventFields(existingEvent, incomingEvent);
 
-            if (isChanged) {
-              const incomingEvent = {
-                date: dateVal,
-                time: timeVal,
-                room: roomVal,
-                type: typeVal,
-                guests: guestsVal,
-              };
+            if (changedFields.length > 0) {
               const conflictId = `event_conflict_${targetEventId}_details`;
               await setDoc(doc(db, "crm_sync_conflicts", conflictId), {
                 id: conflictId,
                 contactId: targetEventId,
                 workerName: getEventDecisionTitle(existingEvent, guestsVal),
                 field: "Event Details",
-                existingValue: JSON.stringify(getComparableEventDetails(existingEvent)),
-                incomingValue: JSON.stringify(incomingEvent),
+                existingValue: JSON.stringify({
+                  ...getComparableEventDetails(existingEvent),
+                  changedFields,
+                }),
+                incomingValue: JSON.stringify({
+                  ...incomingEvent,
+                  changedFields,
+                }),
                 status: "pending",
                 sheetType: "event_schedule",
                 updatedAt: serverTimestamp()
