@@ -420,7 +420,7 @@ function LabelsCell({
     setInputVal("");
   };
 
-  const quickTags = ["Textable", "VIP", "Contractor", "Staff", "Lead", "Urgent", "Active"];
+  const quickTags = ["LSG", "CSG", "Friday", "Saturday", "Spanish"];
 
   if (isEditing) {
     return (
