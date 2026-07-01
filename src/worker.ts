@@ -491,12 +491,13 @@ async function handleSignupSlots(request: Request, env: Env, url: URL): Promise<
       })
       .sort(comparePublicEvents)
       .map((event: any) => {
-        const roleStatus = (role: "bride" | "groom" | "company", contactId: string) => {
+        const roleStatus = (role: "bride" | "groom" | "company", contactId: string, confirmed: boolean) => {
           const pendingName = pendingByEventRole.get(`${event.id}:${role}`) || "";
+          const confirmedAssignment = !!contactId && confirmed;
           return {
-            filled: !!contactId || !!pendingName,
-            name: contactId ? contactNames.get(contactId) || "Assigned" : pendingName,
-            pending: !contactId && !!pendingName,
+            filled: confirmedAssignment || !!pendingName,
+            name: confirmedAssignment ? contactNames.get(contactId) || "Assigned" : pendingName,
+            pending: !confirmedAssignment && !!pendingName,
           };
         };
 
@@ -507,9 +508,9 @@ async function handleSignupSlots(request: Request, env: Env, url: URL): Promise<
           room: event.room,
           title: publicEventTitle(event.guests),
           roles: {
-            bride: roleStatus("bride", event.assignedLsgId || ""),
-            groom: roleStatus("groom", event.assignedGroomLsgId || ""),
-            company: roleStatus("company", event.assignedCsgId || ""),
+            bride: roleStatus("bride", event.assignedLsgId || "", !!event.lsgConfirmed),
+            groom: roleStatus("groom", event.assignedGroomLsgId || "", !!event.groomLsgConfirmed),
+            company: roleStatus("company", event.assignedCsgId || "", !!event.csgConfirmed),
           },
         };
       })

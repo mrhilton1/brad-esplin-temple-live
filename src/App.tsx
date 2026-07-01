@@ -602,7 +602,7 @@ function PrivateApp() {
 
       {/* Clean human-labeled footer */}
       <footer className="mt-16 border-t border-white/5 py-8 bg-black/10 text-center text-xs text-slate-500 relative z-10">
-        <p>© 2026 PDF Column Extractor. Crafted using Google GenAI and React.</p>
+        <p>© 2026 St George Temple Marriages. Crafted using Google GenAI and React.</p>
       </footer>
     </div>
   );

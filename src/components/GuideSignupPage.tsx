@@ -204,7 +204,7 @@ export default function GuideSignupPage() {
             Select A Date & Time
           </h1>
           <p className="max-w-2xl text-sm font-medium leading-relaxed text-slate-600">
-            Choose an open Friday or Saturday assignment, then enter your name for the guide role you can serve.
+            Choose a Friday or Saturday assignment, then enter your name for an available guide role you can serve.
           </p>
         </header>
 
@@ -245,7 +245,7 @@ export default function GuideSignupPage() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {visibleDates.length === 0 ? (
                   <div className="col-span-full rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm font-bold text-slate-500">
-                    No Friday or Saturday openings in this month.
+                    No Friday or Saturday assignments in this month.
                   </div>
                 ) : visibleDates.map(({ date, parsed }) => {
                   const selected = selectedDate === date;
