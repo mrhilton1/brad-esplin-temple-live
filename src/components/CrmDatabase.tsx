@@ -555,6 +555,7 @@ interface ConflictRecord {
 }
 
 const isEventConflict = (conflict: ConflictRecord) => conflict.sheetType === "event_schedule";
+const isGuideSignupConflict = (conflict: ConflictRecord) => conflict.sheetType === "guide_signup" || conflict.field === "Guide Signup";
 
 const parseConflictJson = (value: string): Record<string, any> | null => {
   try {
@@ -630,6 +631,36 @@ const inferEventStatusFromAssignments = (event: Record<string, any>) => {
   return event.assignedLsgId && event.assignedGroomLsgId && event.assignedCsgId ? "assigned" : "unassigned";
 };
 
+const getContactLabels = (contact: ContactRecord): string[] => {
+  return String(contact["Labels"] || "")
+    .split(",")
+    .map(label => label.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const contactHasRoleLabel = (contact: ContactRecord, role: "LSG" | "CSG") => {
+  return getContactLabels(contact).includes(role.toLowerCase());
+};
+
+const getLabelsWithRole = (labelsString: string, role: "LSG" | "CSG"): string => {
+  const labels = String(labelsString || "")
+    .split(",")
+    .map(label => label.trim())
+    .filter(Boolean)
+    .filter(label => label.toLowerCase() !== NEVER_SERVED_LABEL.toLowerCase());
+
+  if (!labels.some(label => label.toLowerCase() === role.toLowerCase())) {
+    labels.push(role);
+  }
+
+  return labels.join(", ");
+};
+
+const getGuideSignupData = (conflict: ConflictRecord): Record<string, any> | null => {
+  const parsed = parseConflictJson(conflict.incomingValue);
+  return parsed?.action === "guide_signup" ? parsed : null;
+};
+
 interface CrmDatabaseProps {
   activeView?: "contacts" | "reviews";
 }
@@ -659,6 +690,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const [bulkResolving, setBulkResolving] = useState(false);
   const [bulkResolveMessage, setBulkResolveMessage] = useState<string | null>(null);
   const [appModal, setAppModal] = useState<AppModalState | null>(null);
+  const [guideSignupContactIds, setGuideSignupContactIds] = useState<Record<string, string>>({});
 
   // Core clean dynamic columns list
   const [columns, setColumns] = useState<string[]>([
@@ -977,6 +1009,88 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     }
   };
 
+  const applyGuideSignup = async (conflict: ConflictRecord) => {
+    const signup = getGuideSignupData(conflict);
+    if (!signup) {
+      throw new Error("Missing guide signup details.");
+    }
+
+    const selectedContactId = guideSignupContactIds[conflict.id] || signup.matchedContactId || "";
+    if (!selectedContactId) {
+      await showAlertModal("Choose the matching contact before accepting this guide signup.", "Contact Match Required");
+      return false;
+    }
+
+    const contact = contacts.find(c => c.id === selectedContactId);
+    if (!contact) {
+      await showAlertModal("That contact could not be found. Refresh and try again.", "Contact Not Found", "danger");
+      return false;
+    }
+
+    const role = signup.role as "bride" | "groom" | "company";
+    const roleConfig = role === "company"
+      ? {
+          eventField: "assignedCsgId",
+          confirmedField: "csgConfirmed",
+          remindedField: "csgReminded",
+          contactRole: "CSG" as const,
+          dateField: "Last CSG",
+        }
+      : role === "groom"
+        ? {
+            eventField: "assignedGroomLsgId",
+            confirmedField: "groomLsgConfirmed",
+            remindedField: "groomLsgReminded",
+            contactRole: "LSG" as const,
+            dateField: "Last LSG",
+          }
+        : {
+            eventField: "assignedLsgId",
+            confirmedField: "lsgConfirmed",
+            remindedField: "lsgReminded",
+            contactRole: "LSG" as const,
+            dateField: "Last LSG",
+          };
+
+    const eventRef = doc(db, "events", signup.eventId || conflict.contactId);
+    const eventSnapshot = await getDoc(eventRef);
+    if (!eventSnapshot.exists()) {
+      throw new Error("The selected event no longer exists.");
+    }
+
+    const currentEvent = eventSnapshot.data();
+    const updatedEvent = {
+      ...currentEvent,
+      [roleConfig.eventField]: selectedContactId,
+      [roleConfig.confirmedField]: false,
+      [roleConfig.remindedField]: false,
+    };
+    const nextStatus = updatedEvent.assignedLsgId && updatedEvent.assignedGroomLsgId && updatedEvent.assignedCsgId
+      ? "assigned"
+      : "unassigned";
+
+    await setDoc(eventRef, {
+      [roleConfig.eventField]: selectedContactId,
+      [roleConfig.confirmedField]: false,
+      [roleConfig.remindedField]: false,
+      status: currentEvent.status === "deleted" || currentEvent.status === "changed" ? currentEvent.status : nextStatus,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    const contactRef = doc(db, "crm_contacts", selectedContactId);
+    await setDoc(contactRef, {
+      [roleConfig.dateField]: signup.eventDate || currentEvent.date || "",
+      Labels: getLabelsWithServiceStatus(
+        getLabelsWithRole(contact["Labels"] || "", roleConfig.contactRole),
+        roleConfig.contactRole === "CSG" ? signup.eventDate || currentEvent.date || "" : contact["Last CSG"] || "",
+        roleConfig.contactRole === "LSG" ? signup.eventDate || currentEvent.date || "" : contact["Last LSG"] || "",
+      ),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    return true;
+  };
+
   const handleResolveConflict = async (
     conflict: ConflictRecord, 
     decision: "yes" | "no" | "never"
@@ -992,7 +1106,10 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       };
       
       if (decision === "yes") {
-        if (isEventConflict(conflict)) {
+        if (isGuideSignupConflict(conflict)) {
+          const applied = await applyGuideSignup(conflict);
+          if (!applied) return;
+        } else if (isEventConflict(conflict)) {
           const eventRef = doc(db, "events", conflict.contactId);
           if (conflict.field === "Event Details") {
             const incomingEvent = parseConflictJson(conflict.incomingValue);
@@ -2387,9 +2504,12 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
               ) : (
                 <div className="grid grid-cols-1 gap-4">
                   {pendingConflicts.map((conflict) => {
+                    const guideSignup = getGuideSignupData(conflict);
                     const eventFieldDiffs = isEventConflict(conflict) && conflict.field === "Event Details"
                       ? getEventFieldDiffs(conflict.existingValue, conflict.incomingValue)
                       : [];
+                    const guideRole = guideSignup?.role === "company" ? "CSG" : "LSG";
+                    const selectedGuideContactId = guideSignupContactIds[conflict.id] || guideSignup?.matchedContactId || "";
 
                     return (
                     <div
@@ -2400,8 +2520,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded-md border border-indigo-500/20 uppercase tracking-wider">
-                              {conflict.sheetType === "worker_history" ? "History Report" : isEventConflict(conflict) ? "Event Schedule" : "Search Results"}
+                              {conflict.sheetType === "worker_history" ? "History Report" : isGuideSignupConflict(conflict) ? "Public Signup" : isEventConflict(conflict) ? "Event Schedule" : "Search Results"}
                             </span>
+                            {isGuideSignupConflict(conflict) && (
+                              <span className="bg-emerald-500/15 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-emerald-500/25 uppercase tracking-wider">
+                                Guide Request
+                              </span>
+                            )}
                             {isEventConflict(conflict) && (
                               <span className="bg-amber-500/15 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-amber-500/25 uppercase tracking-wider">
                                 Event Review
@@ -2423,7 +2548,50 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                         </span>
                       </div>
 
-                      {eventFieldDiffs.length > 0 ? (
+                      {guideSignup ? (
+                        <div className="bg-black/20 p-4 rounded-lg border border-emerald-500/20 text-sm space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider block">Submitted Request</span>
+                              <div className="space-y-1 text-slate-300">
+                                <p><strong className="text-white">{guideSignup.submittedName}</strong></p>
+                                <p>Role: <strong className="text-indigo-300">{guideSignup.roleLabel}</strong></p>
+                                <p>Event: {guideSignup.eventDate} at {guideSignup.eventTime}</p>
+                                <p>Room: {guideSignup.eventRoom || "empty"}</p>
+                              </div>
+                            </div>
+                            <div className="space-y-2 md:border-l md:border-white/5 md:pl-4">
+                              <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider block">CRM Contact Match</span>
+                              {guideSignup.matchedContactName ? (
+                                <p className="text-xs font-bold text-slate-300">
+                                  Suggested match: <span className="text-white">{guideSignup.matchedContactName}</span>
+                                </p>
+                              ) : (
+                                <p className="text-xs font-bold text-amber-300">
+                                  No exact contact match found. Choose the CRM contact below before accepting.
+                                </p>
+                              )}
+                              <select
+                                value={selectedGuideContactId}
+                                onChange={(event) => setGuideSignupContactIds(prev => ({ ...prev, [conflict.id]: event.target.value }))}
+                                className="w-full px-3 py-2 text-xs font-bold text-white bg-slate-950 border border-white/10 rounded-lg focus:outline-hidden focus:border-indigo-400"
+                              >
+                                <option value="">Select matching contact...</option>
+                                {contacts
+                                  .filter(contact => contactHasRoleLabel(contact, guideRole) || contact.id === guideSignup.matchedContactId)
+                                  .map(contact => (
+                                    <option key={contact.id} value={contact.id}>
+                                      {contact["Worker Name"]}
+                                    </option>
+                                  ))}
+                              </select>
+                              <p className="text-[11px] text-slate-500">
+                                Accepting assigns this worker, updates Last {guideRole}, and adds the {guideRole} tag if needed. Confirmed stays unchecked until you mark it.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : eventFieldDiffs.length > 0 ? (
                         <div className="bg-black/20 p-4 rounded-lg border border-white/5 text-sm space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Changed fields:</span>
@@ -2491,6 +2659,8 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                             ? conflict.field === "Event Deletion"
                               ? "Accepting will mark this event deleted. Skipping keeps the event and its current status."
                               : "Accepting will apply the incoming event details and mark it changed for reconfirmation. Skipping keeps the current event details."
+                            : isGuideSignupConflict(conflict)
+                            ? "Accepting assigns this guide and updates the worker service date. Dismissing leaves the event unchanged."
                             : conflict.field === "Presence" 
                             ? "Accepting (Yes) will delete this contact from your CRM directory, rejecting (No) keeps them active."
                             : "Accepting (Yes) will overwrite the field. Rejecting (No) keeps your manual edits secure."
@@ -2503,7 +2673,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/50 disabled:text-emerald-200/60 text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 shadow-xs"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            {isEventConflict(conflict) ? "Accept" : "Yes, Apply"}
+                            {isEventConflict(conflict) || isGuideSignupConflict(conflict) ? "Accept" : "Yes, Apply"}
                           </button>
                           <button
                             onClick={() => handleResolveConflict(conflict, "no")}
@@ -2511,9 +2681,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                             className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 disabled:bg-white/5 disabled:text-slate-500 text-slate-300 hover:text-white text-xs font-bold rounded-lg cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1 border border-white/10"
                           >
                             <X className="w-3.5 h-3.5" />
-                            {isEventConflict(conflict) ? "Dismiss" : "No, Skip"}
+                            {isEventConflict(conflict) || isGuideSignupConflict(conflict) ? "Dismiss" : "No, Skip"}
                           </button>
-                          {!isEventConflict(conflict) && (
+                          {!isEventConflict(conflict) && !isGuideSignupConflict(conflict) && (
                             <button
                               onClick={() => handleResolveConflict(conflict, "never")}
                               disabled={bulkResolving}

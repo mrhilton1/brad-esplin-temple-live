@@ -10,6 +10,7 @@ import FileUploader from "./components/FileUploader";
 import TablePreview from "./components/TablePreview";
 import CrmDatabase from "./components/CrmDatabase";
 import EventMatcher from "./components/EventMatcher";
+import GuideSignupPage from "./components/GuideSignupPage";
 import { UploadedFile, ExtractedTableData } from "./types";
 
 type AppTab = "extractor" | "database" | "schedule" | "reviews";
@@ -86,6 +87,11 @@ const isActionablePendingConflict = (conflict: Record<string, any>) => {
 };
 
 export default function App() {
+  const isPublicSignupPage = typeof window !== "undefined" && window.location.pathname.startsWith("/guide-signup");
+  return isPublicSignupPage ? <GuideSignupPage /> : <PrivateApp />;
+}
+
+function PrivateApp() {
   const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
   const [selectedPreset, setSelectedPreset] = useState("crm_contacts");
   const [isExtracting, setIsExtracting] = useState(false);

@@ -8,6 +8,9 @@ interface Env {
   GEMINI_API_KEY?: string;
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  GUIDE_SIGNUP_TOKEN?: string;
+  SIGNUP_TOKEN?: string;
+  PUBLIC_SIGNUP_TOKEN?: string;
 }
 
 const jsonHeaders = {
@@ -63,6 +66,22 @@ export default {
       }
 
       return handleApplyAllConflicts(request, env);
+    }
+
+    if (url.pathname === "/api/public/signup-slots") {
+      if (request.method !== "GET") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      return handleSignupSlots(request, env, url);
+    }
+
+    if (url.pathname === "/api/public/signup") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      return handleGuideSignup(request, env);
     }
 
     if (url.pathname === "/api/maintenance/clean-emails") {
@@ -223,6 +242,170 @@ async function handleExtract(request: Request, env: Env): Promise<Response> {
   }
 }
 
+async function handleSignupSlots(request: Request, env: Env, url: URL): Promise<Response> {
+  try {
+    const tokenCheck = validateSignupToken(request, env, url.searchParams.get("token"));
+    if (tokenCheck) return tokenCheck;
+
+    const [eventRows, contactRows, conflictRows] = await Promise.all([
+      supabaseRows(env, collections.events.table),
+      supabaseRows(env, collections.crm_contacts.table),
+      supabaseRequest(
+        env,
+        collections.crm_sync_conflicts.table,
+        "?status=eq.pending&sheet_type=eq.guide_signup&select=*",
+      ),
+    ]);
+
+    const contactNames = new Map<string, string>();
+    for (const row of contactRows) {
+      contactNames.set(row.id, row.worker_name || row.id);
+    }
+
+    const pendingByEventRole = new Map<string, string>();
+    for (const row of conflictRows) {
+      const conflict = conflictFromRow(row);
+      const incoming = parseConflictJson(conflict.incomingValue);
+      if (incoming?.action !== "guide_signup" || !incoming.eventId || !incoming.role) continue;
+      const key = `${incoming.eventId}:${incoming.role}`;
+      if (!pendingByEventRole.has(key)) {
+        pendingByEventRole.set(key, incoming.submittedName || `${incoming.lastName || ""}, ${incoming.firstName || ""}`.trim());
+      }
+    }
+
+    const slots = eventRows
+      .map(eventFromRow)
+      .filter((event: any) => {
+        const date = parseFlexibleDate(event.date);
+        if (!date) return false;
+        const day = date.getDay();
+        return (day === 5 || day === 6) && !event.completed && event.status !== "deleted";
+      })
+      .sort(comparePublicEvents)
+      .map((event: any) => {
+        const roleStatus = (role: "bride" | "groom" | "company", contactId: string) => {
+          const pendingName = pendingByEventRole.get(`${event.id}:${role}`) || "";
+          return {
+            filled: !!contactId || !!pendingName,
+            name: contactId ? contactNames.get(contactId) || "Assigned" : pendingName,
+            pending: !contactId && !!pendingName,
+          };
+        };
+
+        return {
+          id: event.id,
+          date: event.date,
+          time: event.time,
+          room: event.room,
+          title: publicEventTitle(event.guests),
+          roles: {
+            bride: roleStatus("bride", event.assignedLsgId || ""),
+            groom: roleStatus("groom", event.assignedGroomLsgId || ""),
+            company: roleStatus("company", event.assignedCsgId || ""),
+          },
+        };
+      })
+      .filter((slot: any) => Object.values(slot.roles).some((role: any) => !role.filled));
+
+    return json({ slots });
+  } catch (error: any) {
+    return json({ error: error?.message || "Failed to load signup slots." }, 500);
+  }
+}
+
+async function handleGuideSignup(request: Request, env: Env): Promise<Response> {
+  try {
+    const body = await request.json().catch(() => ({})) as Record<string, any>;
+    const tokenCheck = validateSignupToken(request, env, body.token);
+    if (tokenCheck) return tokenCheck;
+
+    const eventId = String(body.eventId || "").trim();
+    const role = String(body.role || "").trim().toLowerCase();
+    const firstName = cleanNamePart(body.firstName);
+    const lastName = cleanNamePart(body.lastName);
+
+    if (!eventId || !["bride", "groom", "company"].includes(role)) {
+      return json({ error: "Choose a valid date, time, and guide role." }, 400);
+    }
+    if (!firstName || !lastName) {
+      return json({ error: "First name and last name are required." }, 400);
+    }
+
+    const eventRow = await supabaseRow(env, collections.events.table, eventId);
+    if (!eventRow) {
+      return json({ error: "This event is no longer available." }, 404);
+    }
+
+    const event = eventFromRow(eventRow);
+    const roleField = role === "bride" ? "assignedLsgId" : role === "groom" ? "assignedGroomLsgId" : "assignedCsgId";
+    if (event[roleField]) {
+      return json({ error: "That guide role has already been filled." }, 409);
+    }
+
+    const pendingRows = await supabaseRequest(
+      env,
+      collections.crm_sync_conflicts.table,
+      `?status=eq.pending&sheet_type=eq.guide_signup&contact_id=eq.${encodeURIComponent(eventId)}&select=*`,
+    );
+    const alreadyPending = pendingRows.some((row: any) => {
+      const incoming = parseConflictJson(conflictFromRow(row).incomingValue);
+      return incoming?.action === "guide_signup" && incoming.role === role;
+    });
+    if (alreadyPending) {
+      return json({ error: "Someone has already submitted for that guide role. Please choose another opening." }, 409);
+    }
+
+    const contacts = (await supabaseRows(env, collections.crm_contacts.table)).map(contactFromRow);
+    const matchedContact = findContactBySubmittedName(contacts, firstName, lastName);
+    const submittedName = `${lastName}, ${firstName}`;
+    const roleLabel = role === "bride" ? "Bride Guide" : role === "groom" ? "Groom Guide" : "Company Guide";
+    const now = new Date().toISOString();
+    const conflictId = `guide_signup_${eventId}_${role}_${crypto.randomUUID()}`;
+
+    await supabaseUpsert(env, collections.crm_sync_conflicts.table, conflictToRow({
+      id: conflictId,
+      contactId: eventId,
+      workerName: `${submittedName} for ${publicEventTitle(event.guests)}`,
+      field: "Guide Signup",
+      existingValue: JSON.stringify({
+        date: event.date || "",
+        time: event.time || "",
+        room: event.room || "",
+        guests: event.guests || "",
+        role,
+        roleLabel,
+      }),
+      incomingValue: JSON.stringify({
+        action: "guide_signup",
+        eventId,
+        role,
+        roleLabel,
+        firstName,
+        lastName,
+        submittedName,
+        matchedContactId: matchedContact?.id || "",
+        matchedContactName: matchedContact?.["Worker Name"] || "",
+        eventDate: event.date || "",
+        eventTime: event.time || "",
+        eventRoom: event.room || "",
+        eventGuests: event.guests || "",
+      }),
+      status: "pending",
+      sheetType: "guide_signup",
+      updatedAt: now,
+    }, conflictId));
+
+    return json({
+      ok: true,
+      submittedName,
+      roleLabel,
+      matched: !!matchedContact,
+    });
+  } catch (error: any) {
+    return json({ error: error?.message || "Failed to submit guide signup." }, 500);
+  }
+}
+
 async function handleDatabaseRequest(request: Request, env: Env, url: URL): Promise<Response> {
   try {
     const parts = url.pathname.replace(/^\/api\/db\//, "").split("/").filter(Boolean);
@@ -301,10 +484,11 @@ async function handleApplyAllConflicts(request: Request, env: Env): Promise<Resp
 
     const pendingConflicts = pendingRows
       .map(conflictFromRow)
+      .filter((conflict: any) => conflict.sheetType !== "guide_signup")
       .filter((conflict: any) => !requestedIds || requestedIds.has(String(conflict.id || "")));
     const now = new Date().toISOString();
     const eventConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType === "event_schedule");
-    const contactConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType !== "event_schedule");
+    const contactConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType !== "event_schedule" && conflict.sheetType !== "guide_signup");
     const presenceConflicts = contactConflicts.filter((conflict: any) => conflict.field === "Presence");
     const fieldConflicts = contactConflicts.filter((conflict: any) => conflict.field !== "Presence");
 
@@ -399,6 +583,88 @@ async function handleApplyAllConflicts(request: Request, env: Env): Promise<Resp
   } catch (error: any) {
     return json({ error: error?.message || "Failed to apply all pending conflicts." }, 500);
   }
+}
+
+function validateSignupToken(request: Request, env: Env, providedToken: unknown): Response | null {
+  const expectedToken = env.GUIDE_SIGNUP_TOKEN || env.SIGNUP_TOKEN || env.PUBLIC_SIGNUP_TOKEN;
+  if (!expectedToken) {
+    return json({ error: "Guide signup is not configured yet." }, 404);
+  }
+
+  const url = new URL(request.url);
+  const pathToken = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "");
+  const token = String(providedToken || url.searchParams.get("token") || pathToken || "").trim();
+  if (token !== expectedToken) {
+    return json({ error: "This signup link is not valid." }, 404);
+  }
+
+  return null;
+}
+
+function cleanNamePart(value: unknown): string {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeName(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9,\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findContactBySubmittedName(contacts: Record<string, any>[], firstName: string, lastName: string): Record<string, any> | null {
+  const targetFirst = normalizeName(firstName).split(" ")[0] || "";
+  const targetLast = normalizeName(lastName);
+  if (!targetFirst || !targetLast) return null;
+
+  return contacts.find((contact) => {
+    const name = normalizeName(contact["Worker Name"] || "");
+    const [contactLast = "", rest = ""] = name.split(",").map(part => part.trim());
+    const contactFirst = rest.split(" ")[0] || "";
+    return contactLast === targetLast && contactFirst === targetFirst;
+  }) || null;
+}
+
+function parseFlexibleDate(value: unknown): Date | null {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+
+  const clean = text.replace(/^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),\s*/i, "");
+  const parsedClean = new Date(clean);
+  if (!Number.isNaN(parsedClean.getTime())) return parsedClean;
+  return null;
+}
+
+function publicTimeMinutes(value: unknown): number {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const period = match[3].toUpperCase();
+  if (period === "PM" && hours < 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
+function comparePublicEvents(a: Record<string, any>, b: Record<string, any>): number {
+  const dateA = parseFlexibleDate(a.date)?.getTime() || 0;
+  const dateB = parseFlexibleDate(b.date)?.getTime() || 0;
+  if (dateA !== dateB) return dateA - dateB;
+  return publicTimeMinutes(a.time) - publicTimeMinutes(b.time);
+}
+
+function publicEventTitle(guests: unknown): string {
+  const names = String(guests || "")
+    .split(";")
+    .map(name => name.trim())
+    .filter(Boolean)
+    .map(name => name.split(",")[0]?.trim())
+    .filter(Boolean);
+  if (names.length >= 2) return `${names[0]} & ${names[1]}`;
+  return names[0] || "Temple Assignment";
 }
 
 async function handleCleanEmails(env: Env): Promise<Response> {
