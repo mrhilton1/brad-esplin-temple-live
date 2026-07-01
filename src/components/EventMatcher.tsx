@@ -1360,6 +1360,11 @@ export default function EventMatcher() {
 
     return matchesSearch && matchesDate && matchesStatus;
   }).sort(compareEventsByDateTime);
+  const filteredEventCountsByDate = filteredEvents.reduce<Record<string, number>>((counts, event) => {
+    const heading = formatEventDateHeading(event.date);
+    counts[heading] = (counts[heading] || 0) + 1;
+    return counts;
+  }, {});
 
   const selectedPrintEvents = filteredEvents.filter(event => selectedPrintEventIds.has(event.id));
 
@@ -1966,7 +1971,7 @@ export default function EventMatcher() {
               <React.Fragment key={event.id}>
               {showDateHeading && (
                 <h3 className="px-1 pt-4 text-base sm:text-lg font-bold text-slate-200 tracking-tight">
-                  {dateHeading}
+                  {dateHeading} <span className="text-slate-500">({filteredEventCountsByDate[dateHeading] || 0})</span>
                 </h3>
               )}
               <div

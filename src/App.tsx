@@ -46,6 +46,45 @@ const LOADING_STEPS = [
   "Completing clean data serialization..."
 ];
 
+const parseConflictJson = (value: string): Record<string, any> | null => {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeEventText = (value: string): string => {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s*;\s*/g, "; ")
+    .replace(/\s*,\s*/g, ", ")
+    .trim()
+    .toLowerCase();
+};
+
+const hasSemanticEventDetailsChange = (existingValue: string, incomingValue: string) => {
+  const existing = parseConflictJson(existingValue);
+  const incoming = parseConflictJson(incomingValue);
+  if (!existing || !incoming || existing.action || incoming.action) return true;
+
+  return (["date", "time", "room", "type", "guests"] as const).some(field => {
+    return normalizeEventText(existing[field] || "") !== normalizeEventText(incoming[field] || "");
+  });
+};
+
+const isActionablePendingConflict = (conflict: Record<string, any>) => {
+  if (conflict.status !== "pending") return false;
+  const isNoSemanticEventDetail = conflict.sheetType === "event_schedule" &&
+    conflict.field === "Event Details" &&
+    !hasSemanticEventDetailsChange(conflict.existingValue || "", conflict.incomingValue || "");
+
+  return !isNoSemanticEventDetail;
+};
+
 export default function App() {
   const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
   const [selectedPreset, setSelectedPreset] = useState("crm_contacts");
@@ -86,7 +125,8 @@ export default function App() {
     const unsubscribeConflicts = onSnapshot(
       qConflicts,
       (snapshot) => {
-        setPendingConflictsCount(snapshot.size);
+        const actionableCount = snapshot.docs.filter(docSnap => isActionablePendingConflict(docSnap.data())).length;
+        setPendingConflictsCount(actionableCount);
       },
       (err) => {
         console.error("Supabase conflicts listener error:", err);
