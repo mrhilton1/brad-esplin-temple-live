@@ -3,7 +3,7 @@ import {
   Search, Trash2, Plus, RefreshCw, Sliders, Database, 
   MessageSquare, Phone, Mail, User, ShieldAlert, Check, X,
   PlusCircle, Edit3, Star, Tag, CheckCircle, Info, Home, Calendar,
-  Filter, ChevronDown, Save, Copy, CheckCheck
+  Filter, ChevronDown, Save, Copy, CheckCheck, ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -74,6 +74,8 @@ const ACTIVITY_CONTACT_FIELDS = [
   "Total LSG",
 ] as const;
 
+const NEVER_SERVED_LABEL = "NEVER SERVED";
+
 const HIDDEN_CONTACT_FIELDS = new Set([
   "id",
   "createdAt",
@@ -140,6 +142,91 @@ const formatDateForDb = (dateStr: string): string => {
   const month = months[d.getMonth()];
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
+};
+
+const parseContactActivityDate = (dateStr: string): Date | null => {
+  const inputValue = formatDateForInput(dateStr);
+  if (!inputValue) return null;
+  const parsed = new Date(`${inputValue}T00:00:00`);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getServingRecency = (contact: ContactRecord) => {
+  const csgDate = parseContactActivityDate(contact["Last CSG"] || "");
+  const lsgDate = parseContactActivityDate(contact["Last LSG"] || "");
+  const dates = [csgDate, lsgDate].filter(Boolean) as Date[];
+
+  if (dates.length === 0) {
+    return {
+      neverServed: true,
+      daysSince: null as number | null,
+      latestDate: null as Date | null,
+    };
+  }
+
+  const latestDate = dates.reduce((latest, current) => current > latest ? current : latest);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const normalizedLatest = new Date(latestDate);
+  normalizedLatest.setHours(0, 0, 0, 0);
+
+  return {
+    neverServed: false,
+    daysSince: Math.max(0, Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000)),
+    latestDate: normalizedLatest,
+  };
+};
+
+const getLabelsWithServiceStatus = (labelsString: string, lastCsg: string, lastLsg: string): string => {
+  const labels = String(labelsString || "")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const nonServiceLabels = labels.filter(label => label.toLowerCase() !== NEVER_SERVED_LABEL.toLowerCase());
+  const hasCsgDate = String(lastCsg || "").trim().length > 0;
+  const hasLsgDate = String(lastLsg || "").trim().length > 0;
+
+  if (!hasCsgDate && !hasLsgDate) {
+    return [...nonServiceLabels, NEVER_SERVED_LABEL].join(", ");
+  }
+
+  return nonServiceLabels.join(", ");
+};
+
+const formatRecencyDate = (date: Date | null): string => {
+  if (!date) return "Never served";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return formatDateForDb(`${yyyy}-${mm}-${dd}`);
+};
+
+const getPreferredContactPhone = (contact: ContactRecord): string => {
+  const prefType = String(contact["Preferred Phone Type"] || "").toLowerCase();
+  if (prefType === "personal") {
+    return contact["Personal Phone"] || contact["Household Phone"] || "";
+  }
+  if (prefType === "household") {
+    return contact["Household Phone"] || contact["Personal Phone"] || "";
+  }
+  return contact["Personal Phone"] || contact["Household Phone"] || "";
+};
+
+const replaceContactTemplateTokens = (templateContent: string, contact: ContactRecord): string => {
+  const recency = getServingRecency(contact);
+  const latestServed = formatRecencyDate(recency.latestDate);
+
+  return templateContent
+    .replace(/{worker_name}/g, contact["Worker Name"] || "")
+    .replace(/{contact_name}/g, contact["Worker Name"] || "")
+    .replace(/{household_phone}/g, contact["Household Phone"] || "")
+    .replace(/{personal_phone}/g, contact["Personal Phone"] || "")
+    .replace(/{preferred_phone}/g, getPreferredContactPhone(contact))
+    .replace(/{email}/g, contact["Email"] || "")
+    .replace(/{last_served}/g, latestServed)
+    .replace(/{last_csg}/g, contact["Last CSG"] || "Never served")
+    .replace(/{last_lsg}/g, contact["Last LSG"] || "Never served")
+    .replace(/{days_since_served}/g, recency.daysSince === null ? "Never served" : String(recency.daysSince));
 };
 
 // --- Custom PhoneCell Sub-component ---
@@ -597,8 +684,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const [newTemplateTitle, setNewTemplateTitle] = useState<string>("");
   const [newTemplateContent, setNewTemplateContent] = useState<string>("");
   const [showAddTemplateForm, setShowAddTemplateForm] = useState<boolean>(false);
+  const [textingContact, setTextingContact] = useState<ContactRecord | null>(null);
+  const [selectedContactTemplateId, setSelectedContactTemplateId] = useState<string>("");
+  const [contactMessageBody, setContactMessageBody] = useState<string>("");
+  const [isContactMessageCopied, setIsContactMessageCopied] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const contactMessageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const showModal = (options: Omit<AppModalState, "resolve">): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -674,6 +766,52 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     }, 10);
   };
 
+  const handleInsertContactMessageTextAtCursor = (textToInsert: string) => {
+    const textarea = contactMessageTextareaRef.current;
+    if (!textarea) {
+      setContactMessageBody(prev => prev + textToInsert);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    setContactMessageBody(text.substring(0, start) + textToInsert + text.substring(end));
+
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = start + textToInsert.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 10);
+  };
+
+  const openContactTextModal = (contact: ContactRecord) => {
+    const firstTemplate = templates[0];
+    setTextingContact(contact);
+    setSelectedContactTemplateId(firstTemplate?.id || "");
+    setContactMessageBody(firstTemplate
+      ? replaceContactTemplateTokens(firstTemplate.content, contact)
+      : `Hi ${contact["Worker Name"] || ""},`);
+    setIsContactMessageCopied(false);
+  };
+
+  const applyContactTemplate = (templateId: string) => {
+    setSelectedContactTemplateId(templateId);
+    if (!textingContact) return;
+    const selectedTemplate = templates.find(template => template.id === templateId);
+    setContactMessageBody(selectedTemplate
+      ? replaceContactTemplateTokens(selectedTemplate.content, textingContact)
+      : "");
+    setIsContactMessageCopied(false);
+  };
+
+  const closeContactTextModal = () => {
+    setTextingContact(null);
+    setSelectedContactTemplateId("");
+    setContactMessageBody("");
+    setIsContactMessageCopied(false);
+  };
+
   // Load and migrate contacts from Firebase
   const fetchContacts = async () => {
     setLoading(true);
@@ -682,6 +820,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
       const querySnapshot = await getDocs(collection(db, "crm_contacts"));
       const records: ContactRecord[] = [];
       const foundFields = new Set<string>();
+      const labelSyncs: Promise<void>[] = [];
 
       // Always display core columns first in ordered structure
       foundFields.add("Worker Name");
@@ -701,7 +840,8 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         // --- AUTOMATIC INTELLIGENT DATA MIGRATION ---
         
         // 1. Migrate "Is Textable?" -> Labels tag "Textable"
-        const labels = (data["Labels"] || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        const originalLabels = (data["Labels"] || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+        let labels = [...originalLabels];
         const isTextableVal = data["Is Textable?"] || data["Is Textable"] || data["Textable"];
         if (isTextableVal) {
           const text = String(isTextableVal).toLowerCase();
@@ -710,8 +850,20 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
             labels.push("Textable");
           }
         }
-        data["Labels"] = labels.join(", ");
+
+        data["Labels"] = getLabelsWithServiceStatus(labels.join(", "), data["Last CSG"] || "", data["Last LSG"] || "");
         data["Email"] = cleanEmailValue(data["Email"] || "");
+
+        if (data["Labels"] !== originalLabels.join(", ")) {
+          labelSyncs.push(
+            updateDoc(doc(db, "crm_contacts", docSnap.id), {
+              Labels: data["Labels"],
+              updatedAt: serverTimestamp()
+            }).catch((err) => {
+              console.error(`Failed to sync labels for ${docSnap.id}:`, err);
+            })
+          );
+        }
 
         // 2. Migrate "Preferred Number" -> Preferred Phone Type ("Personal" or "Household")
         if (!data["Preferred Phone Type"] && data["Preferred Number"]) {
@@ -746,6 +898,10 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         const nameB = (b["Worker Name"] || b["Name"] || "").toLowerCase();
         return nameA.localeCompare(nameB);
       });
+
+      if (labelSyncs.length > 0) {
+        await Promise.all(labelSyncs);
+      }
 
       setContacts(records);
       setColumns(Array.from(foundFields));
@@ -1036,14 +1192,23 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const updateContactField = async (contactId: string, field: string, value: string) => {
     try {
       const savedValue = field === "Email" ? cleanEmailValue(value) : value;
-      const contactRef = doc(db, "crm_contacts", contactId);
-      await updateDoc(contactRef, {
+      const existingContact = contacts.find(c => c.id === contactId);
+      const patch: Record<string, any> = {
         [field]: savedValue,
         updatedAt: serverTimestamp()
-      });
+      };
+
+      if (existingContact && (field === "Last CSG" || field === "Last LSG")) {
+        const nextLastCsg = field === "Last CSG" ? savedValue : existingContact["Last CSG"] || "";
+        const nextLastLsg = field === "Last LSG" ? savedValue : existingContact["Last LSG"] || "";
+        patch.Labels = getLabelsWithServiceStatus(existingContact["Labels"] || "", nextLastCsg, nextLastLsg);
+      }
+
+      const contactRef = doc(db, "crm_contacts", contactId);
+      await updateDoc(contactRef, patch);
 
       // Update local state
-      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, [field]: savedValue } : c));
+      setContacts(prev => prev.map(c => c.id === contactId ? { ...c, ...patch } : c));
       setEditingCell(null);
     } catch (err) {
       console.error("Error updating cell:", err);
@@ -1342,6 +1507,158 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {textingContact && (() => {
+          const contactPhone = getPreferredContactPhone(textingContact);
+          const hasPhone = contactPhone.replace(/[^\d]/g, "").length >= 7;
+          const recency = getServingRecency(textingContact);
+
+          return (
+            <motion.div
+              className="fixed inset-0 z-[290] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm px-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeContactTextModal}
+            >
+              <motion.div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="contact-text-modal-title"
+                className="w-full max-w-2xl rounded-xl border border-white/10 bg-slate-900 shadow-2xl overflow-hidden"
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-5 border-b border-white/10 flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 id="contact-text-modal-title" className="text-base font-extrabold text-white flex items-center gap-2">
+                      <MessageSquare className="w-5 h-5 text-indigo-300" />
+                      Text {textingContact["Worker Name"] || "Contact"}
+                    </h3>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                        <Phone className="w-3 h-3" />
+                        {contactPhone || "No preferred phone"}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                        <Calendar className="w-3 h-3" />
+                        Last served: {formatRecencyDate(recency.latestDate)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1">
+                        Days: {recency.daysSince === null ? "Never" : recency.daysSince}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={closeContactTextModal}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
+                      Message Template
+                    </label>
+                    <select
+                      value={selectedContactTemplateId}
+                      onChange={(e) => applyContactTemplate(e.target.value)}
+                      className="w-full px-3 py-2 border border-white/10 rounded-lg bg-slate-950 text-sm text-slate-100 focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 [color-scheme:dark]"
+                    >
+                      <option value="">No template</option>
+                      {templates.map(template => (
+                        <option key={template.id} value={template.id}>{template.title}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
+                      Message
+                    </label>
+                    <textarea
+                      ref={contactMessageTextareaRef}
+                      rows={7}
+                      value={contactMessageBody}
+                      onChange={(e) => {
+                        setContactMessageBody(e.target.value);
+                        setIsContactMessageCopied(false);
+                      }}
+                      className="w-full px-3 py-2 text-sm text-white bg-slate-950 border border-white/10 rounded-lg focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-sans leading-relaxed resize-y min-h-[140px]"
+                    />
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 p-2 bg-slate-950/45 rounded-lg border border-white/5">
+                      <span className="text-[10px] font-bold text-slate-500 mr-1 uppercase tracking-wider font-mono">Insert:</span>
+                      {["👋", "😊", "📅", "⏰", "🔔", "⛪", "✨", "👍"].map(emoji => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleInsertContactMessageTextAtCursor(emoji)}
+                          className="w-6 h-6 flex items-center justify-center text-xs rounded bg-white/5 hover:bg-white/15 border border-white/5 hover:border-white/10 transition-all cursor-pointer"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                      {["{worker_name}", "{preferred_phone}", "{last_served}", "{days_since_served}", "{last_csg}", "{last_lsg}"].map(token => (
+                        <button
+                          key={token}
+                          type="button"
+                          onClick={() => handleInsertContactMessageTextAtCursor(token)}
+                          className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] text-slate-300 font-mono transition-colors cursor-pointer"
+                        >
+                          {token}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 flex flex-col sm:flex-row justify-end gap-2 bg-slate-950/40 border-t border-white/10">
+                  <button
+                    onClick={closeContactTextModal}
+                    className="px-4 py-2 text-xs font-bold rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(contactMessageBody);
+                      setIsContactMessageCopied(true);
+                      setTimeout(() => setIsContactMessageCopied(false), 2000);
+                    }}
+                    className="px-4 py-2 text-xs font-bold rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isContactMessageCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                    {isContactMessageCopied ? "Copied" : "Copy"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!hasPhone) return;
+                      const cleanPhone = contactPhone.replace(/[^\d+]/g, "");
+                      const smsUri = `sms:${cleanPhone}?body=${encodeURIComponent(contactMessageBody)}`;
+                      const link = document.createElement("a");
+                      link.href = smsUri;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    disabled={!hasPhone || !contactMessageBody.trim()}
+                    className="px-4 py-2 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    {hasPhone ? "Open SMS App" : "No Phone"}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+
       {activeView === "contacts" ? (
         <>
           {/* Pinned/Sticky Search & Label Filter Bar */}
@@ -1582,14 +1899,22 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
           <div className="space-y-3 relative z-10">
             {filteredContacts.map((contact) => {
               const customCols = columns.filter(shouldShowAsCustomContactField);
+              const servingRecency = getServingRecency(contact);
 
               return (
                 <div 
                   key={contact.id}
                   className="glass-card border border-white/10 rounded-xl p-3 space-y-2 relative overflow-hidden shadow-md hover:border-indigo-500/30 transition-all"
                 >
-                  {/* Floating Action Menu for Deletion */}
-                  <div className="absolute top-2.5 right-2.5 z-20">
+                  {/* Floating Action Menu */}
+                  <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
+                    <button
+                      onClick={() => openContactTextModal(contact)}
+                      className="text-slate-400 hover:text-indigo-300 hover:bg-indigo-500/10 p-1 rounded-lg transition-all cursor-pointer"
+                      title="Text contact"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={() => deleteContact(contact.id)}
                       className="text-slate-400 hover:text-red-400 hover:bg-red-500/10 p-1 rounded-lg transition-all cursor-pointer"
@@ -1645,6 +1970,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                     <div className="flex items-center gap-1">
                       <span className="text-slate-400 font-medium">Total LSG:</span>
                       <div>{renderMobileCell(contact, "Total LSG")}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 min-w-[150px]">
+                      <CheckCircle className={`w-3 h-3 shrink-0 ${servingRecency.neverServed ? "text-amber-400" : "text-emerald-400"}`} />
+                      <span className="text-slate-400 font-medium">Days Since Served:</span>
+                      <span className={`font-extrabold ${servingRecency.neverServed ? "text-amber-300" : "text-slate-100"}`}>
+                        {servingRecency.daysSince === null ? "Never" : servingRecency.daysSince}
+                      </span>
                     </div>
                   </div>
 
@@ -1867,7 +2199,13 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                       { placeholder: "{bride_and_groom_arrival}", label: "Bride & Groom Arrival" },
                       { placeholder: "{lsg_bride_first}", label: "Bride LSG First" },
                       { placeholder: "{lsg_groom_first}", label: "Groom LSG First" },
-                      { placeholder: "{csg_first}", label: "CSG First" }
+                      { placeholder: "{csg_first}", label: "CSG First" },
+                      { placeholder: "{contact_name}", label: "Contact Name" },
+                      { placeholder: "{preferred_phone}", label: "Preferred Phone" },
+                      { placeholder: "{last_served}", label: "Last Served" },
+                      { placeholder: "{days_since_served}", label: "Days Since Served" },
+                      { placeholder: "{last_csg}", label: "Last CSG" },
+                      { placeholder: "{last_lsg}", label: "Last LSG" }
                     ].map((item) => (
                       <button
                         key={item.placeholder}
