@@ -506,6 +506,12 @@ const getEventFieldDiffs = (existingValue: string, incomingValue: string) => {
     }));
 };
 
+const isNoSemanticEventDetailsConflict = (conflict: ConflictRecord) => {
+  return isEventConflict(conflict) &&
+    conflict.field === "Event Details" &&
+    getEventFieldDiffs(conflict.existingValue, conflict.incomingValue).length === 0;
+};
+
 const formatEventConflictValue = (value: string) => {
   const parsed = parseConflictJson(value);
   if (!parsed) return value;
@@ -900,7 +906,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   };
 
   const handleApplyAllPendingConflicts = async () => {
-    const pending = conflicts.filter(c => c.status === "pending");
+    const pending = pendingConflicts;
     if (pending.length === 0 || bulkResolving) return;
 
     const presenceCount = pending.filter(c => c.field === "Presence" && !isEventConflict(c)).length;
@@ -925,6 +931,9 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         headers: {
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          ids: pending.map(conflict => conflict.id),
+        }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
@@ -1162,7 +1171,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
 
     return matchesSearch && matchesTag;
   });
-  const pendingConflicts = conflicts.filter(c => c.status === "pending");
+  const pendingConflicts = conflicts.filter(c => c.status === "pending" && !isNoSemanticEventDetailsConflict(c));
   const resolvedConflicts = conflicts.filter(c => c.status !== "pending");
 
   // Check if a cell is being edited

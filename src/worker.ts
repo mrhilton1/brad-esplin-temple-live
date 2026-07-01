@@ -62,7 +62,7 @@ export default {
         return json({ error: "Method not allowed" }, 405);
       }
 
-      return handleApplyAllConflicts(env);
+      return handleApplyAllConflicts(request, env);
     }
 
     if (url.pathname === "/api/maintenance/clean-emails") {
@@ -262,13 +262,10 @@ async function handleDatabaseRequest(request: Request, env: Env, url: URL): Prom
     if (request.method === "DELETE" && id) {
       if (collectionName === "events") {
         const existingRow = await supabaseRow(env, config.table, id);
-        const hasAssignedWorkers = !!(
-          existingRow?.assigned_lsg_id ||
-          existingRow?.assigned_groom_lsg_id ||
-          existingRow?.assigned_csg_id
-        );
-
-        if (hasAssignedWorkers) {
+        if (!existingRow) {
+          return json({ ok: true });
+        }
+        if (existingRow?.status !== "deleted") {
           const now = new Date().toISOString();
           const saved = await supabaseUpsert(env, config.table, {
             ...existingRow,
@@ -290,15 +287,21 @@ async function handleDatabaseRequest(request: Request, env: Env, url: URL): Prom
   }
 }
 
-async function handleApplyAllConflicts(env: Env): Promise<Response> {
+async function handleApplyAllConflicts(request: Request, env: Env): Promise<Response> {
   try {
+    const body = await request.json().catch(() => ({})) as { ids?: unknown };
+    const requestedIds = Array.isArray(body.ids)
+      ? new Set(body.ids.map(id => String(id)).filter(Boolean))
+      : null;
     const pendingRows = await supabaseRequest(
       env,
       collections.crm_sync_conflicts.table,
       "?status=eq.pending&select=*",
     );
 
-    const pendingConflicts = pendingRows.map(conflictFromRow);
+    const pendingConflicts = pendingRows
+      .map(conflictFromRow)
+      .filter((conflict: any) => !requestedIds || requestedIds.has(String(conflict.id || "")));
     const now = new Date().toISOString();
     const eventConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType === "event_schedule");
     const contactConflicts = pendingConflicts.filter((conflict: any) => conflict.sheetType !== "event_schedule");

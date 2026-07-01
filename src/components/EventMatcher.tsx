@@ -928,36 +928,43 @@ export default function EventMatcher() {
     }
   };
 
-  // Dismiss / Acknowledge Deleted Event. Assigned events stay visible as soft-deleted
-  // so workers can still be messaged about the cancellation.
+  // Mark an event deleted first so workers can still be messaged about the cancellation.
   const handleDeleteEvent = async (event: EventRecord) => {
     try {
-      if (eventHasAssignedWorkers(event)) {
-        await updateDoc(doc(db, "events", event.id), {
-          status: "deleted",
-          updatedAt: serverTimestamp()
-        });
-        setEvents(events.map(e => e.id === event.id ? { ...e, status: "deleted" } : e));
-        setSyncStatus({
-          type: "success",
-          message: "Event kept as DELETED because workers are assigned. It will remain visible so you can message them about the cancellation."
-        });
-        setTimeout(() => setSyncStatus(null), 7000);
-        return;
-      }
+      await updateDoc(doc(db, "events", event.id), {
+        status: "deleted",
+        updatedAt: serverTimestamp()
+      });
+      setEvents(events.map(e => e.id === event.id ? { ...e, status: "deleted" } : e));
+      setSyncStatus({
+        type: "success",
+        message: "Event marked DELETED and kept in the schedule so assigned workers can be notified."
+      });
+      setTimeout(() => setSyncStatus(null), 7000);
+    } catch (err) {
+      console.error("Failed to mark event deleted:", err);
+      setSyncStatus({
+        type: "error",
+        message: "Failed to mark event deleted."
+      });
+    }
+  };
 
+  const handlePermanentlyDeleteEvent = async (event: EventRecord) => {
+    if (event.status !== "deleted") return;
+    try {
       await deleteDoc(doc(db, "events", event.id));
       setEvents(events.filter(e => e.id !== event.id));
       setSyncStatus({
         type: "success",
-        message: "Event deletion acknowledged. Removed from schedule list because no workers were assigned."
+        message: "Deleted event permanently removed."
       });
       setTimeout(() => setSyncStatus(null), 4000);
     } catch (err) {
-      console.error("Failed to delete event:", err);
+      console.error("Failed to permanently delete event:", err);
       setSyncStatus({
         type: "error",
-        message: "Failed to update deleted event status."
+        message: "Failed to permanently delete event."
       });
     }
   };
@@ -2358,11 +2365,12 @@ export default function EventMatcher() {
 
                           {event.status === "deleted" && (
                             <button
-                              onClick={() => handleDeleteEvent(event)}
+                              onClick={() => handlePermanentlyDeleteEvent(event)}
                               className="flex items-center gap-1 px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-white border border-red-500/30 hover:border-red-500/50 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono"
+                              title="Permanently remove this already-deleted event"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                              <span>{eventHasAssignedWorkers(event) ? "Keep Deleted" : "Dismiss"}</span>
+                              <span>Permanently Delete</span>
                             </button>
                           )}
 
