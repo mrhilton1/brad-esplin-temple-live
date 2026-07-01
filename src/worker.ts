@@ -149,6 +149,9 @@ function handleAdminLogin(_request: Request, env: Env, url: URL): Response {
 function isAuthorizedAdmin(request: Request, env: Env): boolean {
   const expectedToken = env.ADMIN_ACCESS_TOKEN;
   if (!expectedToken) return false;
+  const headerToken = request.headers.get("X-Admin-Token") || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (headerToken === expectedToken) return true;
+
   const cookieHeader = request.headers.get("Cookie") || "";
   const cookies = Object.fromEntries(cookieHeader.split(";").map(part => {
     const [key, ...rest] = part.trim().split("=");

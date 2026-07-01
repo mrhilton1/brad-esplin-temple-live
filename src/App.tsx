@@ -88,6 +88,13 @@ const isActionablePendingConflict = (conflict: Record<string, any>) => {
 
 export default function App() {
   const isPublicSignupPage = typeof window !== "undefined" && window.location.pathname.startsWith("/guide-signup");
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin-login/")) {
+    const adminToken = decodeURIComponent(window.location.pathname.replace(/^\/admin-login\//, "").split("/")[0] || "");
+    if (adminToken) {
+      window.localStorage.setItem("temple_admin_token", adminToken);
+      window.history.replaceState({}, "", "/contacts");
+    }
+  }
   return isPublicSignupPage ? <GuideSignupPage /> : <PrivateApp />;
 }
 
