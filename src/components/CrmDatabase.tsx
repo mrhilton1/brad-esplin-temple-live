@@ -215,10 +215,13 @@ const getPreferredContactPhone = (contact: ContactRecord): string => {
 const replaceContactTemplateTokens = (templateContent: string, contact: ContactRecord): string => {
   const recency = getServingRecency(contact);
   const latestServed = formatRecencyDate(recency.latestDate);
+  const workerName = contact["Worker Name"] || "";
+  const workerFirstName = String(workerName).split(",")[1]?.trim().split(/\s+/)[0] || String(workerName).trim().split(/\s+/)[0] || "";
 
   return templateContent
-    .replace(/{worker_name}/g, contact["Worker Name"] || "")
-    .replace(/{contact_name}/g, contact["Worker Name"] || "")
+    .replace(/{worker_name}/g, workerName)
+    .replace(/{worker_first_name}/g, workerFirstName)
+    .replace(/{contact_name}/g, workerName)
     .replace(/{household_phone}/g, contact["Household Phone"] || "")
     .replace(/{personal_phone}/g, contact["Personal Phone"] || "")
     .replace(/{preferred_phone}/g, getPreferredContactPhone(contact))
@@ -1603,7 +1606,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                           {emoji}
                         </button>
                       ))}
-                      {["{worker_name}", "{preferred_phone}", "{last_served}", "{days_since_served}", "{last_csg}", "{last_lsg}"].map(token => (
+                      {["{worker_name}", "{worker_first_name}", "{preferred_phone}", "{last_served}", "{days_since_served}", "{last_csg}", "{last_lsg}"].map(token => (
                         <button
                           key={token}
                           type="button"
@@ -2191,6 +2194,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
                   <div className="flex flex-wrap gap-1.5">
                     {[
                       { placeholder: "{worker_name}", label: "Worker Name" },
+                      { placeholder: "{worker_first_name}", label: "Worker First Name" },
                       { placeholder: "{title}", label: "Event Title" },
                       { placeholder: "{date}", label: "Event Date" },
                       { placeholder: "{time}", label: "Event Time" },

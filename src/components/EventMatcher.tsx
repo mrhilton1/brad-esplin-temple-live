@@ -239,15 +239,17 @@ interface SearchableWorkerSelectProps {
   placeholder: string;
   disabled?: boolean;
   compact?: boolean;
+  selectedValueClassName?: string;
 }
 
 // Custom Searchable Dropdown Combobox Component with instant Clear
-function SearchableWorkerSelect({ value, onChange, workers, placeholder, disabled, compact }: SearchableWorkerSelectProps) {
+function SearchableWorkerSelect({ value, onChange, workers, placeholder, disabled, compact, selectedValueClassName }: SearchableWorkerSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   
   const selectedWorker = workers.find(w => w.id === value);
   const displayValue = selectedWorker ? selectedWorker["Worker Name"] : "";
+  const selectedTextClass = !isOpen && value && selectedValueClassName ? selectedValueClassName : "text-white";
 
   // Filter workers dynamically based on query
   const filteredWorkers = workers.filter(w => {
@@ -273,7 +275,7 @@ function SearchableWorkerSelect({ value, onChange, workers, placeholder, disable
               setIsOpen(true);
             }}
             placeholder={placeholder}
-            className={`px-2.5 py-1 text-xs text-white bg-slate-900/80 border border-white/10 rounded-md focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 pr-8 truncate disabled:opacity-40 disabled:cursor-not-allowed transition-all font-mono ${
+            className={`px-2.5 py-1 text-xs ${selectedTextClass} bg-slate-900/80 border border-white/10 rounded-md focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 pr-8 truncate disabled:opacity-40 disabled:cursor-not-allowed transition-all font-mono ${
               compact ? "w-[118px] lg:w-[132px]" : "w-[140px] xs:w-[150px] sm:w-[170px]"
             }`}
           />
@@ -587,6 +589,7 @@ export default function EventMatcher() {
 
     return templateContent
       .replace(/{worker_name}/g, workerFirstName)
+      .replace(/{worker_first_name}/g, workerFirstName)
       .replace(/{role}/g, roleLabel)
       .replace(/{title}/g, recordTitle)
       .replace(/{date}/g, dateText)
@@ -2063,6 +2066,7 @@ export default function EventMatcher() {
                         workers={lsgWorkers}
                         placeholder="Bride LSG..."
                         disabled={event.status === "deleted" || event.completed}
+                        selectedValueClassName={!event.lsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
                       />
                       <SearchableWorkerSelect
@@ -2071,6 +2075,7 @@ export default function EventMatcher() {
                         workers={lsgWorkers}
                         placeholder="Groom LSG..."
                         disabled={event.status === "deleted" || event.completed}
+                        selectedValueClassName={!event.groomLsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
                       />
                       <SearchableWorkerSelect
@@ -2079,6 +2084,7 @@ export default function EventMatcher() {
                         workers={csgWorkers}
                         placeholder="CSG..."
                         disabled={event.status === "deleted" || event.completed}
+                        selectedValueClassName={!event.csgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
                       />
                     </div>
@@ -2528,7 +2534,7 @@ export default function EventMatcher() {
                           rows={4}
                           value={newTemplateContent}
                           onChange={(e) => setNewTemplateContent(e.target.value)}
-                          placeholder="Placeholders: {worker_name}, {role}, {title}, {date}, {time}, {lsg_arrival}, {csg_arrival}, {lsg_bride_first}, {lsg_groom_first}, {csg_first}"
+                          placeholder="Placeholders: {worker_name}, {worker_first_name}, {role}, {title}, {date}, {time}, {lsg_arrival}, {csg_arrival}, {lsg_bride_first}, {lsg_groom_first}, {csg_first}"
                           className="w-full px-3 py-2 text-xs text-white bg-slate-900 border border-white/10 rounded-lg focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 font-mono h-28"
                         />
                         
@@ -2552,6 +2558,7 @@ export default function EventMatcher() {
                           <div className="flex flex-wrap gap-1 mt-1">
                             {[
                               { placeholder: "{worker_name}", label: "Name" },
+                              { placeholder: "{worker_first_name}", label: "First Name" },
                               { placeholder: "{role}", label: "Role Label" },
                               { placeholder: "{title}", label: "Sealing Title" },
                               { placeholder: "{date}", label: "Date" },
