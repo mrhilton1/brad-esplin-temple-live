@@ -134,8 +134,22 @@ const getWorkerServiceRecency = (worker: any) => {
 
   return {
     neverServed: false,
-    daysSince: Math.max(0, Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000)),
+    daysSince: Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000),
   };
+};
+
+const getLabelsWithRole = (labelsString: string, role: "LSG" | "CSG"): string => {
+  const labels = String(labelsString || "")
+    .split(",")
+    .map(label => label.trim())
+    .filter(Boolean)
+    .filter(label => label.toLowerCase() !== "never served");
+
+  if (!labels.some(label => label.toLowerCase() === role.toLowerCase())) {
+    labels.push(role);
+  }
+
+  return labels.join(", ");
 };
 
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
@@ -702,6 +716,39 @@ export default function EventMatcher() {
     return timeA - timeB;
   });
 
+  const applyRoleDateToContact = async (
+    contactId: string,
+    role: "LSG" | "CSG",
+    eventDate: string,
+    options: { incrementTotal?: boolean } = {}
+  ) => {
+    if (!contactId) return "";
+
+    const workerRef = doc(db, "crm_contacts", contactId);
+    const workerSnap = await getDoc(workerRef);
+    if (!workerSnap.exists()) return "";
+
+    const worker = workerSnap.data();
+    const totalField = role === "LSG" ? "Total LSG" : "Total CSG";
+    const dateField = role === "LSG" ? "Last LSG" : "Last CSG";
+    const currentTotal = parseInt(worker[totalField] || "0", 10) || 0;
+    const patch: Record<string, any> = {
+      [dateField]: eventDate,
+      Labels: getLabelsWithRole(worker["Labels"] || "", role),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (options.incrementTotal) {
+      patch[totalField] = (currentTotal + 1).toString();
+    }
+
+    await updateDoc(workerRef, patch);
+    setContacts(prev => prev.map(contact => contact.id === contactId ? { ...contact, ...patch } : contact));
+
+    const totalText = options.incrementTotal ? `, +1 ${role}` : "";
+    return `${worker["Worker Name"] || role} (${role} tag, Last ${role}: ${eventDate}${totalText})`;
+  };
+
   // Update event assignment in Supabase
   const handleAssignWorker = async (eventId: string, role: "lsg" | "groom_lsg" | "csg", contactId: string) => {
     try {
@@ -772,12 +819,20 @@ export default function EventMatcher() {
     try {
       const eventRef = doc(db, "events", eventId);
       let confirmField: "lsgConfirmed" | "groomLsgConfirmed" | "csgConfirmed";
+      let assignmentField: "assignedLsgId" | "assignedGroomLsgId" | "assignedCsgId";
+      let contactRole: "LSG" | "CSG";
       if (role === "lsg") {
         confirmField = "lsgConfirmed";
+        assignmentField = "assignedLsgId";
+        contactRole = "LSG";
       } else if (role === "groom_lsg") {
         confirmField = "groomLsgConfirmed";
+        assignmentField = "assignedGroomLsgId";
+        contactRole = "LSG";
       } else {
         confirmField = "csgConfirmed";
+        assignmentField = "assignedCsgId";
+        contactRole = "CSG";
       }
 
       const newValue = !currentValue;
@@ -792,6 +847,10 @@ export default function EventMatcher() {
         [confirmField]: newValue,
         updatedAt: serverTimestamp()
       });
+
+      if (newValue && updatedEvent[assignmentField]) {
+        await applyRoleDateToContact(updatedEvent[assignmentField] || "", contactRole, updatedEvent.date);
+      }
 
       // Add to session edited set to prevent disappearing records
       setSessionEditedIds(prev => {
@@ -864,56 +923,20 @@ export default function EventMatcher() {
 
       // 1. If Bride LSG assigned, increment statistics as LSG
       if (event.assignedLsgId) {
-        const workerRef = doc(db, "crm_contacts", event.assignedLsgId);
-        const workerSnap = await getDoc(workerRef);
-        if (workerSnap.exists()) {
-          const wData = workerSnap.data();
-          const currentTotal = parseInt(wData["Total LSG"] || "0", 10) || 0;
-          const newTotal = currentTotal + 1;
-          
-          await updateDoc(workerRef, {
-            "Total LSG": newTotal.toString(),
-            "Last LSG": event.date,
-            "updatedAt": serverTimestamp()
-          });
-          updatedWorkersInfo.push(`${wData["Worker Name"] || "Bride LSG"} (+1 LSG, Last: ${event.date})`);
-        }
+        const updateInfo = await applyRoleDateToContact(event.assignedLsgId, "LSG", event.date, { incrementTotal: true });
+        if (updateInfo) updatedWorkersInfo.push(updateInfo);
       }
 
       // 2. If Groom LSG assigned, ALSO increment statistics as LSG
       if (event.assignedGroomLsgId) {
-        const workerRef = doc(db, "crm_contacts", event.assignedGroomLsgId);
-        const workerSnap = await getDoc(workerRef);
-        if (workerSnap.exists()) {
-          const wData = workerSnap.data();
-          const currentTotal = parseInt(wData["Total LSG"] || "0", 10) || 0;
-          const newTotal = currentTotal + 1;
-
-          await updateDoc(workerRef, {
-            "Total LSG": newTotal.toString(),
-            "Last LSG": event.date,
-            "updatedAt": serverTimestamp()
-          });
-          updatedWorkersInfo.push(`${wData["Worker Name"] || "Groom LSG"} (+1 LSG, Last: ${event.date})`);
-        }
+        const updateInfo = await applyRoleDateToContact(event.assignedGroomLsgId, "LSG", event.date, { incrementTotal: true });
+        if (updateInfo) updatedWorkersInfo.push(updateInfo);
       }
 
       // 3. If CSG Worker assigned, increment statistics as CSG
       if (event.assignedCsgId) {
-        const workerRef = doc(db, "crm_contacts", event.assignedCsgId);
-        const workerSnap = await getDoc(workerRef);
-        if (workerSnap.exists()) {
-          const wData = workerSnap.data();
-          const currentTotal = parseInt(wData["Total CSG"] || "0", 10) || 0;
-          const newTotal = currentTotal + 1;
-
-          await updateDoc(workerRef, {
-            "Total CSG": newTotal.toString(),
-            "Last CSG": event.date,
-            "updatedAt": serverTimestamp()
-          });
-          updatedWorkersInfo.push(`${wData["Worker Name"] || "CSG Worker"} (+1 CSG, Last: ${event.date})`);
-        }
+        const updateInfo = await applyRoleDateToContact(event.assignedCsgId, "CSG", event.date, { incrementTotal: true });
+        if (updateInfo) updatedWorkersInfo.push(updateInfo);
       }
 
       // Add to session edited set to prevent disappearing records under current filter (Option A)
@@ -1096,6 +1119,18 @@ export default function EventMatcher() {
 
       await updateDoc(doc(db, "events", event.id), updates);
 
+      if (nextStatus === "covered") {
+        if (event.assignedLsgId) {
+          await applyRoleDateToContact(event.assignedLsgId, "LSG", event.date);
+        }
+        if (event.assignedGroomLsgId) {
+          await applyRoleDateToContact(event.assignedGroomLsgId, "LSG", event.date);
+        }
+        if (event.assignedCsgId) {
+          await applyRoleDateToContact(event.assignedCsgId, "CSG", event.date);
+        }
+      }
+
       if (wasCompleted) {
         await reverseCompletedEventStats(event);
       }
@@ -1194,6 +1229,20 @@ export default function EventMatcher() {
           updates["Last CSG"] = latestCsgDate;
           needsUpdate = true;
         }
+        if (totalLsgCount > 0) {
+          const nextLabels = getLabelsWithRole(updates["Labels"] || contact["Labels"] || "", "LSG");
+          if (nextLabels !== (contact["Labels"] || "")) {
+            updates["Labels"] = nextLabels;
+            needsUpdate = true;
+          }
+        }
+        if (totalCsgCount > 0) {
+          const nextLabels = getLabelsWithRole(updates["Labels"] || contact["Labels"] || "", "CSG");
+          if (nextLabels !== (updates["Labels"] || contact["Labels"] || "")) {
+            updates["Labels"] = nextLabels;
+            needsUpdate = true;
+          }
+        }
 
         if (totalLsgCount > 0 && totalLsgCount.toString() !== currentLsg.toString()) {
           updates["Total LSG"] = totalLsgCount.toString();
@@ -1230,7 +1279,10 @@ export default function EventMatcher() {
 
   // Sort contact list by longest time since service. Never-served contacts stay at the bottom.
   const getSortedWorkersForRole = (role: "LSG" | "CSG") => {
-    return [...contacts].sort((a, b) => {
+    return contacts.filter(contact => {
+      const labels = (contact["Labels"] || "").toLowerCase().split(",").map((label: string) => label.trim());
+      return labels.includes(role.toLowerCase());
+    }).sort((a, b) => {
       const aLabels = (a["Labels"] || "").toLowerCase();
       const bLabels = (b["Labels"] || "").toLowerCase();
       const aHasRole = aLabels.includes(role.toLowerCase());

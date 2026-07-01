@@ -172,34 +172,13 @@ const getServingRecency = (contact: ContactRecord) => {
 
   return {
     neverServed: false,
-    daysSince: Math.max(0, Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000)),
+    daysSince: Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000),
     latestDate: normalizedLatest,
   };
 };
 
 const getContactSortName = (contact: ContactRecord): string => {
   return String(contact["Worker Name"] || contact["Name"] || "").toLowerCase();
-};
-
-const sortContactsByServiceRecency = (a: ContactRecord, b: ContactRecord): number => {
-  const recencyA = getServingRecency(a);
-  const recencyB = getServingRecency(b);
-  const nameA = getContactSortName(a);
-  const nameB = getContactSortName(b);
-
-  if (recencyA.neverServed !== recencyB.neverServed) {
-    return recencyA.neverServed ? 1 : -1;
-  }
-
-  if (!recencyA.neverServed && !recencyB.neverServed) {
-    const daysA = recencyA.daysSince ?? -1;
-    const daysB = recencyB.daysSince ?? -1;
-    if (daysA !== daysB) {
-      return daysB - daysA;
-    }
-  }
-
-  return nameA.localeCompare(nameB);
 };
 
 const getLabelsWithServiceStatus = (labelsString: string, lastCsg: string, lastLsg: string): string => {
@@ -920,8 +899,8 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         });
       });
 
-      // Sort by longest time since last service, then alphabetically. Never-served contacts stay at the bottom.
-      records.sort(sortContactsByServiceRecency);
+      // Contacts page stays alphabetical; assignment dropdowns handle service-recency sorting.
+      records.sort((a, b) => getContactSortName(a).localeCompare(getContactSortName(b)));
 
       if (labelSyncs.length > 0) {
         await Promise.all(labelSyncs);
