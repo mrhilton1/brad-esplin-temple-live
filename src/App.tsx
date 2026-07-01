@@ -87,7 +87,9 @@ const isActionablePendingConflict = (conflict: Record<string, any>) => {
 };
 
 export default function App() {
-  const isPublicSignupHost = typeof window !== "undefined" && window.location.hostname.toLowerCase() === "schedule.stgtp.com";
+  const hostname = typeof window !== "undefined" ? window.location.hostname.toLowerCase() : "";
+  const isPublicSignupHost = hostname === "schedule.stgtp.com";
+  const isComingSoonHost = hostname === "stgtp.com" || hostname === "www.stgtp.com";
   const isPublicSignupPage = typeof window !== "undefined" && window.location.pathname.startsWith("/guide-signup");
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin-login/")) {
     const adminToken = decodeURIComponent(window.location.pathname.replace(/^\/admin-login\//, "").split("/")[0] || "");
@@ -96,7 +98,21 @@ export default function App() {
       window.history.replaceState({}, "", "/contacts");
     }
   }
+  if (isComingSoonHost) return <ComingSoonPage />;
   return isPublicSignupHost || isPublicSignupPage ? <GuideSignupPage /> : <PrivateApp />;
+}
+
+function ComingSoonPage() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6 text-center text-slate-950">
+      <section className="max-w-xl">
+        <h1 className="text-5xl font-black tracking-normal sm:text-6xl">Coming Soon</h1>
+        <p className="mt-4 text-lg font-semibold leading-relaxed text-slate-600">
+          This site is not open to the public yet.
+        </p>
+      </section>
+    </main>
+  );
 }
 
 function PrivateApp() {
