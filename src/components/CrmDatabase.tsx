@@ -75,6 +75,7 @@ const ACTIVITY_CONTACT_FIELDS = [
 ] as const;
 
 const NEVER_SERVED_LABEL = "NEVER SERVED";
+const GUIDE_SIGNUP_TOKEN = "7c2389ff28ebda3d2fc608ab10a7d4a59c864a61310a6c8e";
 
 const HIDDEN_CONTACT_FIELDS = new Set([
   "id",
@@ -727,6 +728,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
   const [selectedContactTemplateId, setSelectedContactTemplateId] = useState<string>("");
   const [contactMessageBody, setContactMessageBody] = useState<string>("");
   const [isContactMessageCopied, setIsContactMessageCopied] = useState(false);
+  const [isCalendarLinkCopied, setIsCalendarLinkCopied] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contactMessageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -849,6 +851,21 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     setSelectedContactTemplateId("");
     setContactMessageBody("");
     setIsContactMessageCopied(false);
+  };
+
+  const publicCalendarLink = typeof window !== "undefined"
+    ? `${window.location.origin}/guide-signup/${GUIDE_SIGNUP_TOKEN}`
+    : `/guide-signup/${GUIDE_SIGNUP_TOKEN}`;
+
+  const copyPublicCalendarLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicCalendarLink);
+      setIsCalendarLinkCopied(true);
+      window.setTimeout(() => setIsCalendarLinkCopied(false), 1800);
+    } catch (err) {
+      console.error("Failed to copy calendar link:", err);
+      await showAlertModal(publicCalendarLink, "Calendar Link");
+    }
   };
 
   // Load and migrate contacts from Firebase
@@ -2163,6 +2180,31 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
         </>
       ) : (
         <div className="space-y-6">
+          <div className="glass-card rounded-xl p-5 sm:p-6 border border-white/10 shadow-lg space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-indigo-400" />
+                  Public Calendar Signup Link
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                  Share this with temple contacts so they can request Bride, Groom, or Company guide openings without accessing the CRM.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={copyPublicCalendarLink}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all cursor-pointer shadow-md"
+              >
+                {isCalendarLinkCopied ? <CheckCheck className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {isCalendarLinkCopied ? "Copied" : "Copy Link"}
+              </button>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-xs font-mono text-slate-300 break-all">
+              {publicCalendarLink}
+            </div>
+          </div>
+
           {/* Custom Column Management Section */}
           <div className="glass-card rounded-xl p-6 border border-white/10 shadow-lg space-y-4">
             <div>
