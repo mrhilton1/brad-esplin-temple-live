@@ -75,7 +75,7 @@ const ACTIVITY_CONTACT_FIELDS = [
 ] as const;
 
 const NEVER_SERVED_LABEL = "NEVER SERVED";
-const GUIDE_SIGNUP_TOKEN = "7c2389ff28ebda3d2fc608ab10a7d4a59c864a61310a6c8e";
+const PUBLIC_CALENDAR_URL = "https://schedule.stgtmp.com";
 
 const HIDDEN_CONTACT_FIELDS = new Set([
   "id",
@@ -853,9 +853,7 @@ export default function CrmDatabase({ activeView = "contacts" }: CrmDatabaseProp
     setIsContactMessageCopied(false);
   };
 
-  const publicCalendarLink = typeof window !== "undefined"
-    ? `${window.location.origin}/guide-signup/${GUIDE_SIGNUP_TOKEN}`
-    : `/guide-signup/${GUIDE_SIGNUP_TOKEN}`;
+  const publicCalendarLink = PUBLIC_CALENDAR_URL;
 
   const copyPublicCalendarLink = async () => {
     try {

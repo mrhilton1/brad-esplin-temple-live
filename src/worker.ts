@@ -18,6 +18,11 @@ const jsonHeaders = {
   "Content-Type": "application/json",
 };
 
+const SCHEDULE_HOST = "schedule.stgtmp.com";
+const COORD_HOST = "coord.stgtmp.com";
+const APEX_HOSTS = new Set(["stgtmp.com", "www.stgtmp.com"]);
+const MANAGED_CUSTOM_HOSTS = new Set([SCHEDULE_HOST, COORD_HOST, ...APEX_HOSTS]);
+
 const systemInstruction = `You are an expert data extraction assistant specializing in document cleaning and structure recovery.
 Your absolute goal is to extract only the main columns and tables of information from the provided PDF document.
 Return exactly the requested schema as JSON. Every row must align exactly with the columns array.
@@ -34,7 +39,12 @@ Ensure the extracted column headers are clean and descriptive.`;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const response = await handleRequest(request, env, url);
+    return addNoIndexHeaders(response, url);
+  },
+};
 
+async function handleRequest(request: Request, env: Env, url: URL): Promise<Response> {
     if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
       return new Response(null, {
         status: 204,
@@ -45,11 +55,30 @@ export default {
       });
     }
 
+    if (url.pathname === "/robots.txt") {
+      return new Response("User-agent: *\nDisallow: /\n", {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    if (isApexHost(url)) {
+      return comingSoonPage();
+    }
+
     if (url.pathname.startsWith("/admin-login/")) {
       return handleAdminLogin(request, env, url);
     }
 
-    if (!isPublicRoute(url) && !isAuthorizedAdmin(request, env)) {
+    if (isScheduleHost(url) && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/public/")) {
+      return json({ error: "Not found." }, 404);
+    }
+
+    const requiresAdmin = !isCoordHost(url) && !isScheduleHost(url);
+    if (requiresAdmin && !isPublicRoute(url) && !isAuthorizedAdmin(request, env)) {
       if (url.pathname.startsWith("/api/")) {
         return json({ error: "Admin access required." }, 401);
       }
@@ -110,8 +139,43 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
-  },
-};
+}
+
+function getHost(url: URL): string {
+  return url.hostname.toLowerCase();
+}
+
+function isScheduleHost(url: URL): boolean {
+  return getHost(url) === SCHEDULE_HOST;
+}
+
+function isCoordHost(url: URL): boolean {
+  return getHost(url) === COORD_HOST;
+}
+
+function isApexHost(url: URL): boolean {
+  return APEX_HOSTS.has(getHost(url));
+}
+
+function isManagedCustomHost(url: URL): boolean {
+  return MANAGED_CUSTOM_HOSTS.has(getHost(url));
+}
+
+function addNoIndexHeaders(response: Response, url: URL): Response {
+  if (!isManagedCustomHost(url)) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  if ((headers.get("Content-Type") || "").includes("text/html")) {
+    headers.set("Cache-Control", "no-store");
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function isPublicRoute(url: URL): boolean {
   return url.pathname.startsWith("/guide-signup") ||
@@ -206,6 +270,37 @@ function adminLockedPage(): Response {
   </body>
 </html>`, {
     status: 404,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function comingSoonPage(): Response {
+  return new Response(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>Coming Soon</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8fafc; color: #111827; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      main { width: min(520px, calc(100vw - 32px)); text-align: center; padding: 40px 24px; }
+      h1 { margin: 0 0 12px; font-size: clamp(32px, 8vw, 56px); line-height: 1; letter-spacing: 0; }
+      p { margin: 0 auto; max-width: 34rem; color: #475569; font-size: 17px; line-height: 1.6; font-weight: 650; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Coming Soon</h1>
+      <p>This site is not open to the public yet.</p>
+    </main>
+  </body>
+</html>`, {
+    status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -699,12 +794,16 @@ async function handleApplyAllConflicts(request: Request, env: Env): Promise<Resp
 }
 
 function validateSignupToken(request: Request, env: Env, providedToken: unknown): Response | null {
+  const url = new URL(request.url);
+  if (isScheduleHost(url)) {
+    return null;
+  }
+
   const expectedToken = env.GUIDE_SIGNUP_TOKEN || env.SIGNUP_TOKEN || env.PUBLIC_SIGNUP_TOKEN;
   if (!expectedToken) {
     return json({ error: "Guide signup is not configured yet." }, 404);
   }
 
-  const url = new URL(request.url);
   const pathToken = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "");
   const token = String(providedToken || url.searchParams.get("token") || pathToken || "").trim();
   if (token !== expectedToken) {

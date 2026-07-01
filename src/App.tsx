@@ -87,6 +87,7 @@ const isActionablePendingConflict = (conflict: Record<string, any>) => {
 };
 
 export default function App() {
+  const isPublicSignupHost = typeof window !== "undefined" && window.location.hostname.toLowerCase() === "schedule.stgtmp.com";
   const isPublicSignupPage = typeof window !== "undefined" && window.location.pathname.startsWith("/guide-signup");
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin-login/")) {
     const adminToken = decodeURIComponent(window.location.pathname.replace(/^\/admin-login\//, "").split("/")[0] || "");
@@ -95,7 +96,7 @@ export default function App() {
       window.history.replaceState({}, "", "/contacts");
     }
   }
-  return isPublicSignupPage ? <GuideSignupPage /> : <PrivateApp />;
+  return isPublicSignupHost || isPublicSignupPage ? <GuideSignupPage /> : <PrivateApp />;
 }
 
 function PrivateApp() {
