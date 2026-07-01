@@ -257,7 +257,7 @@ function SearchableWorkerSelect({ value, onChange, workers, placeholder, disable
   });
 
   return (
-    <div className="relative inline-block text-left">
+    <div className="relative z-30 inline-block text-left">
       <div className="flex items-center gap-1">
         <div className="relative flex items-center">
           <input
@@ -304,7 +304,7 @@ function SearchableWorkerSelect({ value, onChange, workers, placeholder, disable
           {/* Backdrop click dismiss */}
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
           
-          <div className={`absolute left-0 mt-1 ${compact ? "w-[180px]" : "w-[200px]"} max-h-[180px] overflow-y-auto bg-slate-950 border border-white/15 rounded-md shadow-2xl z-50 py-1 scrollbar-thin`}>
+          <div className={`absolute left-0 mt-1 ${compact ? "w-[180px]" : "w-[200px]"} max-h-[180px] overflow-y-auto bg-slate-950 border border-white/15 rounded-md shadow-2xl z-[70] py-1 scrollbar-thin`}>
             {filteredWorkers.length === 0 ? (
               <div className="px-3 py-2 text-[11px] text-slate-500 italic">No workers found</div>
             ) : (
@@ -1988,7 +1988,7 @@ export default function EventMatcher() {
                   }}
                   className="px-4 py-3 bg-white/3 border-b border-white/5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 cursor-pointer hover:bg-white/5 select-none transition-colors"
                 >
-                  <div className="text-xs sm:text-sm font-bold text-slate-100 font-mono tracking-tight flex-1 truncate flex items-center gap-1.5 flex-wrap">
+                  <div className="text-xs sm:text-sm font-bold text-slate-100 font-mono tracking-tight flex-1 min-w-0 flex items-center gap-1.5 flex-wrap overflow-visible">
                     <label
                       onClick={(e) => e.stopPropagation()}
                       className="mr-1 inline-flex items-center justify-center cursor-pointer"
@@ -2001,7 +2001,7 @@ export default function EventMatcher() {
                         className="w-4 h-4 rounded border-white/20 bg-slate-900/80 text-indigo-600 focus:ring-indigo-400 focus:ring-offset-0 cursor-pointer"
                       />
                     </label>
-                    <span className="text-white font-sans">{namePart} Sealing</span>
+                    <span className="text-white font-sans truncate max-w-[220px] sm:max-w-[280px]">{namePart} Sealing</span>
                     <span className="text-slate-600">|</span>
                     <span className="text-slate-300">{datePart}</span>
                     <span className="text-slate-600">|</span>
