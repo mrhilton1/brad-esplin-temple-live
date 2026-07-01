@@ -152,6 +152,13 @@ const getLabelsWithRole = (labelsString: string, role: "LSG" | "CSG"): string =>
   return labels.join(", ");
 };
 
+const shouldReplaceServiceDate = (currentDate: string, candidateDate: string): boolean => {
+  if (!candidateDate) return false;
+  const currentTime = parseDateString(currentDate)?.getTime() || 0;
+  const candidateTime = parseDateString(candidateDate)?.getTime() || 0;
+  return candidateTime > currentTime;
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -274,6 +281,7 @@ interface SearchableWorkerSelectProps {
   value: string;
   onChange: (id: string) => void;
   workers: any[];
+  allWorkers?: any[];
   placeholder: string;
   disabled?: boolean;
   compact?: boolean;
@@ -281,11 +289,11 @@ interface SearchableWorkerSelectProps {
 }
 
 // Custom Searchable Dropdown Combobox Component with instant Clear
-function SearchableWorkerSelect({ value, onChange, workers, placeholder, disabled, compact, selectedValueClassName }: SearchableWorkerSelectProps) {
+function SearchableWorkerSelect({ value, onChange, workers, allWorkers = workers, placeholder, disabled, compact, selectedValueClassName }: SearchableWorkerSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   
-  const selectedWorker = workers.find(w => w.id === value);
+  const selectedWorker = workers.find(w => w.id === value) || allWorkers.find(w => w.id === value);
   const displayValue = selectedWorker ? selectedWorker["Worker Name"] : "";
   const selectedTextClass = !isOpen && value && selectedValueClassName ? selectedValueClassName : "text-white";
 
@@ -660,6 +668,58 @@ export default function EventMatcher() {
     return contact["Personal Phone"] || contact["Household Phone"] || "";
   };
 
+  const backfillRoleTagsFromAssignments = async (eventsList: EventRecord[], contactsList: any[]) => {
+    const contactsById = new Map(contactsList.map(contact => [contact.id, contact]));
+    const patchesByContactId = new Map<string, Record<string, any>>();
+
+    const addRolePatch = (contactId: string | undefined, role: "LSG" | "CSG", eventDate: string, isConfirmed: boolean | undefined) => {
+      if (!contactId) return;
+      const contact = contactsById.get(contactId);
+      if (!contact) return;
+
+      const currentPatch = patchesByContactId.get(contactId) || {};
+      const baseLabels = currentPatch.Labels || contact["Labels"] || "";
+      const nextLabels = getLabelsWithRole(baseLabels, role);
+      if (nextLabels !== baseLabels) {
+        currentPatch.Labels = nextLabels;
+      }
+
+      const dateField = role === "LSG" ? "Last LSG" : "Last CSG";
+      const baseDate = currentPatch[dateField] || contact[dateField] || "";
+      if (isConfirmed && shouldReplaceServiceDate(baseDate, eventDate)) {
+        currentPatch[dateField] = eventDate;
+      }
+
+      if (Object.keys(currentPatch).length > 0) {
+        patchesByContactId.set(contactId, currentPatch);
+      }
+    };
+
+    eventsList.forEach(event => {
+      addRolePatch(event.assignedLsgId, "LSG", event.date, event.lsgConfirmed);
+      addRolePatch(event.assignedGroomLsgId, "LSG", event.date, event.groomLsgConfirmed);
+      addRolePatch(event.assignedCsgId, "CSG", event.date, event.csgConfirmed);
+    });
+
+    if (patchesByContactId.size === 0) {
+      return contactsList;
+    }
+
+    const writeTasks = Array.from(patchesByContactId.entries()).map(async ([contactId, patch]) => {
+      await updateDoc(doc(db, "crm_contacts", contactId), {
+        ...patch,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    await Promise.all(writeTasks);
+
+    return contactsList.map(contact => {
+      const patch = patchesByContactId.get(contact.id);
+      return patch ? { ...contact, ...patch } : contact;
+    });
+  };
+
   // Clear session edits when filter changes so the user can re-filter freshly
   useEffect(() => {
     setSessionEditedIds(new Set());
@@ -685,7 +745,8 @@ export default function EventMatcher() {
       contactsSnap.forEach((docSnap) => {
         contactsList.push({ id: docSnap.id, ...docSnap.data() });
       });
-      setContacts(contactsList);
+      const repairedContactsList = await backfillRoleTagsFromAssignments(eventsList, contactsList);
+      setContacts(repairedContactsList);
     } catch (err) {
       console.error("Error loading Event Matcher data:", err);
     } finally {
@@ -2155,6 +2216,7 @@ export default function EventMatcher() {
                         value={event.assignedLsgId || ""}
                         onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
                         workers={lsgWorkers}
+                        allWorkers={contacts}
                         placeholder="Bride LSG..."
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.lsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
@@ -2164,6 +2226,7 @@ export default function EventMatcher() {
                         value={event.assignedGroomLsgId || ""}
                         onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
                         workers={lsgWorkers}
+                        allWorkers={contacts}
                         placeholder="Groom LSG..."
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.groomLsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
@@ -2173,6 +2236,7 @@ export default function EventMatcher() {
                         value={event.assignedCsgId || ""}
                         onChange={(val) => handleAssignWorker(event.id, "csg", val)}
                         workers={csgWorkers}
+                        allWorkers={contacts}
                         placeholder="CSG..."
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.csgConfirmed ? "text-rose-300 font-extrabold" : undefined}
@@ -2272,6 +2336,7 @@ export default function EventMatcher() {
                                   value={event.assignedLsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
                                   workers={lsgWorkers}
+                                  allWorkers={contacts}
                                   placeholder="Select Bride LSG..."
                                   disabled={event.status === "deleted" || event.completed}
                                 />
@@ -2323,6 +2388,7 @@ export default function EventMatcher() {
                                   value={event.assignedGroomLsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
                                   workers={lsgWorkers}
+                                  allWorkers={contacts}
                                   placeholder="Select Groom LSG..."
                                   disabled={event.status === "deleted" || event.completed}
                                 />
@@ -2389,6 +2455,7 @@ export default function EventMatcher() {
                                   value={event.assignedCsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "csg", val)}
                                   workers={csgWorkers}
+                                  allWorkers={contacts}
                                   placeholder="Select CSG Worker..."
                                   disabled={event.status === "deleted" || event.completed}
                                 />
