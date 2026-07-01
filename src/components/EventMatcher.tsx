@@ -114,6 +114,30 @@ const eventHasAssignedWorkers = (event: EventRecord): boolean => {
   return !!(event.assignedLsgId || event.assignedGroomLsgId || event.assignedCsgId);
 };
 
+const getWorkerServiceRecency = (worker: any) => {
+  const csgDate = parseDateString(worker["Last CSG"] || "");
+  const lsgDate = parseDateString(worker["Last LSG"] || "");
+  const dates = [csgDate, lsgDate].filter(Boolean) as Date[];
+
+  if (dates.length === 0) {
+    return {
+      neverServed: true,
+      daysSince: null as number | null,
+    };
+  }
+
+  const latestDate = dates.reduce((latest, current) => current > latest ? current : latest);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const normalizedLatest = new Date(latestDate);
+  normalizedLatest.setHours(0, 0, 0, 0);
+
+  return {
+    neverServed: false,
+    daysSince: Math.max(0, Math.floor((today.getTime() - normalizedLatest.getTime()) / 86400000)),
+  };
+};
+
 // Check if event date is in the past compared to system date 2026-06-25 (or current date if later)
 const isDateInPast = (dateStr: string): boolean => {
   const d = parseDateString(dateStr);
@@ -1204,13 +1228,28 @@ export default function EventMatcher() {
     }
   };
 
-  // Sort contact list with priority to certified workers
+  // Sort contact list by longest time since service. Never-served contacts stay at the bottom.
   const getSortedWorkersForRole = (role: "LSG" | "CSG") => {
     return [...contacts].sort((a, b) => {
       const aLabels = (a["Labels"] || "").toLowerCase();
       const bLabels = (b["Labels"] || "").toLowerCase();
       const aHasRole = aLabels.includes(role.toLowerCase());
       const bHasRole = bLabels.includes(role.toLowerCase());
+      const recencyA = getWorkerServiceRecency(a);
+      const recencyB = getWorkerServiceRecency(b);
+
+      if (recencyA.neverServed !== recencyB.neverServed) {
+        return recencyA.neverServed ? 1 : -1;
+      }
+
+      if (!recencyA.neverServed && !recencyB.neverServed) {
+        const daysA = recencyA.daysSince ?? -1;
+        const daysB = recencyB.daysSince ?? -1;
+        if (daysA !== daysB) {
+          return daysB - daysA;
+        }
+      }
+
       if (aHasRole && !bHasRole) return -1;
       if (!aHasRole && bHasRole) return 1;
       return (a["Worker Name"] || "").localeCompare(b["Worker Name"] || "");
