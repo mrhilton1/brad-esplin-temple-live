@@ -67,6 +67,18 @@ const compareEventsByDateTime = (a: EventRecord, b: EventRecord): number => {
   return (a.guests || a.id || "").localeCompare(b.guests || b.id || "");
 };
 
+const formatEventDateHeading = (dateStr: string): string => {
+  const d = parseDateString(dateStr);
+  if (!d) return dateStr || "Undated";
+
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 const eventNeedsLsg = (event: EventRecord): boolean => {
   return !!(
     !event.completed &&
@@ -226,10 +238,11 @@ interface SearchableWorkerSelectProps {
   workers: any[];
   placeholder: string;
   disabled?: boolean;
+  compact?: boolean;
 }
 
 // Custom Searchable Dropdown Combobox Component with instant Clear
-function SearchableWorkerSelect({ value, onChange, workers, placeholder, disabled }: SearchableWorkerSelectProps) {
+function SearchableWorkerSelect({ value, onChange, workers, placeholder, disabled, compact }: SearchableWorkerSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   
@@ -260,7 +273,9 @@ function SearchableWorkerSelect({ value, onChange, workers, placeholder, disable
               setIsOpen(true);
             }}
             placeholder={placeholder}
-            className="px-2.5 py-1 text-xs text-white bg-slate-900/80 border border-white/10 rounded-md focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 w-[140px] xs:w-[150px] sm:w-[170px] pr-8 truncate disabled:opacity-40 disabled:cursor-not-allowed transition-all font-mono"
+            className={`px-2.5 py-1 text-xs text-white bg-slate-900/80 border border-white/10 rounded-md focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 pr-8 truncate disabled:opacity-40 disabled:cursor-not-allowed transition-all font-mono ${
+              compact ? "w-[118px] lg:w-[132px]" : "w-[140px] xs:w-[150px] sm:w-[170px]"
+            }`}
           />
           
           {/* Clear button or trigger chevron */}
@@ -289,7 +304,7 @@ function SearchableWorkerSelect({ value, onChange, workers, placeholder, disable
           {/* Backdrop click dismiss */}
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
           
-          <div className="absolute left-0 mt-1 w-[200px] max-h-[180px] overflow-y-auto bg-slate-950 border border-white/15 rounded-md shadow-2xl z-50 py-1 scrollbar-thin">
+          <div className={`absolute left-0 mt-1 ${compact ? "w-[180px]" : "w-[200px]"} max-h-[180px] overflow-y-auto bg-slate-950 border border-white/15 rounded-md shadow-2xl z-50 py-1 scrollbar-thin`}>
             {filteredWorkers.length === 0 ? (
               <div className="px-3 py-2 text-[11px] text-slate-500 italic">No workers found</div>
             ) : (
@@ -1789,6 +1804,9 @@ export default function EventMatcher() {
       ) : (
         <div className="grid grid-cols-1 gap-5">
           {filteredEvents.map((event, index) => {
+            const dateHeading = formatEventDateHeading(event.date);
+            const previousDateHeading = index > 0 ? formatEventDateHeading(filteredEvents[index - 1].date) : "";
+            const showDateHeading = index === 0 || dateHeading !== previousDateHeading;
             const isPast = isDateInPast(event.date);
             const lsgArrival = calculateArrivalTime(event.time, 90);
             const guestArrival = calculateArrivalTime(event.time, 75);
@@ -1945,8 +1963,13 @@ export default function EventMatcher() {
             }
 
             return (
+              <React.Fragment key={event.id}>
+              {showDateHeading && (
+                <h3 className="px-1 pt-4 text-base sm:text-lg font-bold text-slate-200 tracking-tight">
+                  {dateHeading}
+                </h3>
+              )}
               <div
-                key={event.id}
                 style={{ zIndex: 100 - index }} // Dynamic z-index placement! Ensures dropdown of upper record overlays bottom records cleanly
                 className={`glass-card rounded-xl border ${borderClass} shadow-md transition-all flex flex-col relative`}
               >
@@ -2025,6 +2048,35 @@ export default function EventMatcher() {
                         </span>
                       </div>
                     )}
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex flex-wrap items-center gap-1.5 pl-1"
+                    >
+                      <SearchableWorkerSelect
+                        value={event.assignedLsgId || ""}
+                        onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
+                        workers={lsgWorkers}
+                        placeholder="Bride LSG..."
+                        disabled={event.status === "deleted" || event.completed}
+                        compact
+                      />
+                      <SearchableWorkerSelect
+                        value={event.assignedGroomLsgId || ""}
+                        onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
+                        workers={lsgWorkers}
+                        placeholder="Groom LSG..."
+                        disabled={event.status === "deleted" || event.completed}
+                        compact
+                      />
+                      <SearchableWorkerSelect
+                        value={event.assignedCsgId || ""}
+                        onChange={(val) => handleAssignWorker(event.id, "csg", val)}
+                        workers={csgWorkers}
+                        placeholder="CSG..."
+                        disabled={event.status === "deleted" || event.completed}
+                        compact
+                      />
+                    </div>
                   </div>
                   <div className="shrink-0 relative flex items-center justify-end gap-2">
                     <div
@@ -2389,6 +2441,7 @@ export default function EventMatcher() {
                   </div>
                 )}
               </div>
+              </React.Fragment>
             );
           })}
         </div>
