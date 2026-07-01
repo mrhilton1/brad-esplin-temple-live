@@ -75,7 +75,7 @@ const ACTIVITY_CONTACT_FIELDS = [
 ] as const;
 
 const NEVER_SERVED_LABEL = "NEVER SERVED";
-const PUBLIC_CALENDAR_URL = "https://schedule.stgtmp.com";
+const PUBLIC_CALENDAR_URL = "https://schedule.stgtp.com";
 
 const HIDDEN_CONTACT_FIELDS = new Set([
   "id",

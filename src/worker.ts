@@ -18,9 +18,9 @@ const jsonHeaders = {
   "Content-Type": "application/json",
 };
 
-const SCHEDULE_HOST = "schedule.stgtmp.com";
-const COORD_HOST = "coord.stgtmp.com";
-const APEX_HOSTS = new Set(["stgtmp.com", "www.stgtmp.com"]);
+const SCHEDULE_HOST = "schedule.stgtp.com";
+const COORD_HOST = "coord.stgtp.com";
+const APEX_HOSTS = new Set(["stgtp.com", "www.stgtp.com"]);
 const MANAGED_CUSTOM_HOSTS = new Set([SCHEDULE_HOST, COORD_HOST, ...APEX_HOSTS]);
 
 const systemInstruction = `You are an expert data extraction assistant specializing in document cleaning and structure recovery.
