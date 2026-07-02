@@ -69,13 +69,13 @@ const roleEntries = (slot: SignupSlot) => {
 };
 
 const roleSummaryText = (label: string, status: SignupRole) => {
-  if (status.pending) return `${label}: Pending: ${status.name || "Submitted"}`;
+  if (status.pending) return `${label}: ${status.name || "Submitted"} (pending)`;
   if (status.confirmed || status.filled) return `${label}: ${status.name || "Assigned"}`;
   return `${label}: Open`;
 };
 
 const roleChoiceText = (status: SignupRole) => {
-  if (status.pending) return `Pending: ${status.name || "Submitted"}`;
+  if (status.pending) return `${status.name || "Submitted"} (pending)`;
   if (status.confirmed || status.filled) return `Assigned: ${status.name || "Assigned"}`;
   return "Available";
 };
