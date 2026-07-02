@@ -80,6 +80,10 @@ const roleChoiceText = (status: SignupRole) => {
   return "Available";
 };
 
+const slotHasOpenRole = (slot: SignupSlot) => {
+  return roleEntries(slot).some(({ status }) => !status.filled);
+};
+
 export default function GuideSignupPage() {
   const [slots, setSlots] = useState<SignupSlot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -262,7 +266,9 @@ export default function GuideSignupPage() {
                   </div>
                 ) : visibleDates.map(({ date, parsed }) => {
                   const selected = selectedDate === date;
-                  const count = slots.filter(slot => slot.date === date).length;
+                  const dateSlots = slots.filter(slot => slot.date === date);
+                  const count = dateSlots.length;
+                  const hasOpenRole = dateSlots.some(slotHasOpenRole);
                   return (
                     <button
                       key={date}
@@ -271,10 +277,18 @@ export default function GuideSignupPage() {
                       className={`rounded-xl border p-4 text-left transition ${
                         selected
                           ? "border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200"
-                          : "border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50"
+                          : hasOpenRole
+                            ? "border-slate-200 bg-white hover:border-indigo-200 hover:bg-indigo-50"
+                            : "border-indigo-200 bg-indigo-50 hover:border-indigo-300 hover:bg-indigo-100"
                       }`}
                     >
-                      <span className={`block text-xs font-black uppercase tracking-wider ${selected ? "text-indigo-100" : "text-slate-500"}`}>
+                      <span className={`block text-xs font-black uppercase tracking-wider ${
+                        selected
+                          ? "text-indigo-100"
+                          : hasOpenRole
+                            ? "text-slate-500"
+                            : "text-slate-500"
+                      }`}>
                         {parsed.toLocaleDateString(undefined, { weekday: "long" })}
                       </span>
                       <span className="mt-1 block text-2xl font-black">{parsed.getDate()}</span>
