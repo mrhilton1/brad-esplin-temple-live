@@ -493,11 +493,12 @@ async function handleSignupSlots(request: Request, env: Env, url: URL): Promise<
       .map((event: any) => {
         const roleStatus = (role: "bride" | "groom" | "company", contactId: string, confirmed: boolean) => {
           const pendingName = pendingByEventRole.get(`${event.id}:${role}`) || "";
-          const confirmedAssignment = !!contactId && confirmed;
+          const assignedName = contactId ? contactNames.get(contactId) || "Assigned" : "";
           return {
-            filled: confirmedAssignment || !!pendingName,
-            name: confirmedAssignment ? contactNames.get(contactId) || "Assigned" : pendingName,
-            pending: !confirmedAssignment && !!pendingName,
+            filled: !!contactId || !!pendingName,
+            name: assignedName || pendingName,
+            pending: (!!contactId && !confirmed) || !!pendingName,
+            confirmed: !!contactId && confirmed,
           };
         };
 
@@ -514,7 +515,7 @@ async function handleSignupSlots(request: Request, env: Env, url: URL): Promise<
           },
         };
       })
-      .filter((slot: any) => Object.values(slot.roles).some((role: any) => !role.filled));
+      .filter((slot: any) => Object.values(slot.roles).some((role: any) => !role.confirmed));
 
     return json({ slots });
   } catch (error: any) {

@@ -7,6 +7,7 @@ type SignupRole = {
   filled: boolean;
   name?: string;
   pending?: boolean;
+  confirmed?: boolean;
 };
 
 type SignupSlot = {
@@ -65,6 +66,18 @@ const roleEntries = (slot: SignupSlot) => {
     label: ROLE_LABELS[role],
     status: slot.roles[role],
   }));
+};
+
+const roleSummaryText = (label: string, status: SignupRole) => {
+  if (status.pending) return `${label}: Pending: ${status.name || "Submitted"}`;
+  if (status.confirmed || status.filled) return `${label}: ${status.name || "Assigned"}`;
+  return `${label}: Open`;
+};
+
+const roleChoiceText = (status: SignupRole) => {
+  if (status.pending) return `Pending: ${status.name || "Submitted"}`;
+  if (status.confirmed || status.filled) return `Assigned: ${status.name || "Assigned"}`;
+  return "Available";
 };
 
 export default function GuideSignupPage() {
@@ -320,12 +333,14 @@ export default function GuideSignupPage() {
                             <span
                               key={role}
                               className={`rounded-full px-2.5 py-1 text-[11px] font-black ${
-                                status.filled
+                                status.pending
+                                  ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                                  : status.filled
                                   ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
                                   : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
                               }`}
                             >
-                              {label}: {status.filled ? status.name || "Submitted" : "Open"}
+                              {roleSummaryText(label, status)}
                             </span>
                           ))}
                         </div>
@@ -355,7 +370,7 @@ export default function GuideSignupPage() {
                       >
                         <span className="block font-black">{label}</span>
                         <span className={`mt-1 block text-xs font-bold ${selectedRole === role ? "text-indigo-100" : "text-slate-500"}`}>
-                          {status.filled ? `${status.pending ? "Pending review" : "Assigned"}: ${status.name || "Submitted"}` : "Available"}
+                          {roleChoiceText(status)}
                         </span>
                       </button>
                     ))}
