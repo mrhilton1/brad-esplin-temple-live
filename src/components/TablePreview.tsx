@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { 
   Download, Edit2, Check, Trash2, Plus, Search, HelpCircle, 
   Settings, Columns, RefreshCw, FileDown, CheckCircle2, Database, X
@@ -161,9 +161,11 @@ interface TablePreviewProps {
   onDataUpdated: (newData: ExtractedTableData) => void;
   onReset: () => void;
   sheetPreset: string;
+  autoStore?: boolean;
+  onAutoStoreComplete?: (sheetPreset: string) => void;
 }
 
-export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset }: TablePreviewProps) {
+export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset, autoStore = false, onAutoStoreComplete }: TablePreviewProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [editingCell, setEditingCell] = useState<{ rIndex: number; cIndex: number } | null>(null);
   const [editingHeader, setEditingHeader] = useState<number | null>(null);
@@ -180,8 +182,9 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
 
   const [isSavingDb, setIsSavingDb] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const autoStoreStartedRef = useRef(false);
 
-  const handleSaveToDatabase = async () => {
+  const handleSaveToDatabase = async (navigateAfterSave = false) => {
     setIsSavingDb(true);
     setSaveStatus(null);
 
@@ -757,6 +760,10 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
         setSaveStatus(null);
       }, 8000);
 
+      if (navigateAfterSave) {
+        window.setTimeout(() => onAutoStoreComplete?.(sheetPreset), 650);
+      }
+
     } catch (err: any) {
       console.error("Error saving to Supabase:", err);
       setSaveStatus({
@@ -768,6 +775,11 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
     }
   };
 
+  useEffect(() => {
+    if (!autoStore || autoStoreStartedRef.current) return;
+    autoStoreStartedRef.current = true;
+    void handleSaveToDatabase(true);
+  }, []);
 
   // Handle cell edit save
   const saveCellEdit = () => {

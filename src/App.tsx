@@ -178,6 +178,12 @@ function PrivateApp() {
     }
   };
 
+  const handleAutoStoreComplete = (presetId: string) => {
+    setSelectedFile(null);
+    setExtractedData(null);
+    navigateToTab(presetId === "crm_contacts" ? "database" : "schedule");
+  };
+
   // Interval timer to cycle through extraction loading messages
   const startLoadingAnimation = () => {
     setCurrentStep(0);
@@ -562,6 +568,8 @@ function PrivateApp() {
                   onDataUpdated={setExtractedData}
                   onReset={handleReset}
                   sheetPreset={selectedPreset}
+                  autoStore
+                  onAutoStoreComplete={handleAutoStoreComplete}
                 />
               )}
             </motion.div>
