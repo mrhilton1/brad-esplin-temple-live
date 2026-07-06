@@ -964,6 +964,57 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
     doc.save(`${cleanFileName}_clean.pdf`);
   };
 
+  if (autoStore) {
+    const presetLabel = sheetPreset === "crm_contacts"
+      ? "Worker Search Results"
+      : sheetPreset === "worker_history"
+        ? "Worker History Report"
+        : "Ordinance Schedule";
+    const destinationLabel = sheetPreset === "crm_contacts" ? "Contacts" : "Events";
+
+    return (
+      <div className="glass-card mx-auto mt-10 max-w-xl rounded-2xl p-8 text-center shadow-2xl">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
+          {saveStatus?.type === "error" ? (
+            <X className="h-8 w-8 text-red-300" />
+          ) : saveStatus?.type === "success" ? (
+            <CheckCircle2 className="h-8 w-8 text-emerald-300" />
+          ) : (
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-300/30 border-t-indigo-300" />
+          )}
+        </div>
+        <h2 className="mt-5 text-2xl font-black tracking-normal text-white">
+          {saveStatus?.type === "error" ? "Import Needs Attention" : `Saving ${presetLabel}`}
+        </h2>
+        <p className="mx-auto mt-3 max-w-md text-sm font-semibold leading-relaxed text-slate-300">
+          {saveStatus?.type === "error"
+            ? saveStatus.message
+            : `Storing extracted records in the CRM database. You will be sent to ${destinationLabel} automatically when this finishes.`}
+        </p>
+        {saveStatus?.type === "error" && (
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={() => handleSaveToDatabase(true)}
+              disabled={isSavingDb}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-70"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSavingDb ? "animate-spin" : ""}`} />
+              Try Again
+            </button>
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-slate-200 transition hover:bg-white/10"
+            >
+              Back to PDF Upload
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="w-full space-y-6">
       {/* Overview Block */}
