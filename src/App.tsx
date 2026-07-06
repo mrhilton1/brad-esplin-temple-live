@@ -110,7 +110,7 @@ function ComingSoonPage() {
 
 function PrivateApp() {
   const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
-  const [selectedPreset, setSelectedPreset] = useState("crm_contacts");
+  const [selectedPreset, setSelectedPreset] = useState("event_schedule");
   const [isExtracting, setIsExtracting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [extractedData, setExtractedData] = useState<ExtractedTableData | null>(null);
@@ -203,7 +203,7 @@ function PrivateApp() {
     setSelectedFile(null);
     setExtractedData(null);
     setError(null);
-    setSelectedPreset("crm_contacts");
+    setSelectedPreset("event_schedule");
   };
 
   // Use Gemini for layout-aware extraction.
@@ -390,21 +390,21 @@ function PrivateApp() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <button
                         type="button"
-                        onClick={() => handlePresetSelect("crm_contacts")}
+                        onClick={() => handlePresetSelect("event_schedule")}
                         className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                          selectedPreset === "crm_contacts"
+                          selectedPreset === "event_schedule"
                             ? "bg-indigo-600/15 border-indigo-400 text-white shadow-lg"
                             : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:border-white/20"
                         }`}
                       >
                         <div className="font-bold text-sm flex items-center gap-1.5 flex-wrap">
-                          👥 Worker Search Results
+                          📅 Ordinance Schedule
                           <span className="bg-indigo-500/20 text-indigo-300 text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                            CRM Info
+                            Event Matcher
                           </span>
                         </div>
                         <div className="text-xs text-slate-400 mt-1.5 leading-relaxed font-sans">
-                          Target exact columns: <strong>Worker Name</strong>, <strong>Household Phone</strong>, <strong>Personal Phone</strong>, <strong>Email</strong>, with smart <strong>Labels</strong> & <strong>Preferred Phone</strong> styling.
+                          Target schedule columns: <strong>Date</strong>, <strong>Time</strong>, <strong>Room</strong>, <strong>Type</strong>, and <strong>Names of the guests</strong>.
                         </div>
                       </button>
 
@@ -430,21 +430,21 @@ function PrivateApp() {
 
                       <button
                         type="button"
-                        onClick={() => handlePresetSelect("event_schedule")}
+                        onClick={() => handlePresetSelect("crm_contacts")}
                         className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                          selectedPreset === "event_schedule"
+                          selectedPreset === "crm_contacts"
                             ? "bg-indigo-600/15 border-indigo-400 text-white shadow-lg"
                             : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:border-white/20"
                         }`}
                       >
                         <div className="font-bold text-sm flex items-center gap-1.5 flex-wrap">
-                          📅 Ordinance Schedule
+                          👥 Worker Search Results
                           <span className="bg-indigo-500/20 text-indigo-300 text-[10px] font-semibold px-1.5 py-0.5 rounded">
-                            Event Matcher
+                            CRM Info
                           </span>
                         </div>
                         <div className="text-xs text-slate-400 mt-1.5 leading-relaxed font-sans">
-                          Target schedule columns: <strong>Date</strong>, <strong>Time</strong>, <strong>Room</strong>, <strong>Type</strong>, and <strong>Names of the guests</strong>.
+                          Target exact columns: <strong>Worker Name</strong>, <strong>Household Phone</strong>, <strong>Personal Phone</strong>, <strong>Email</strong>, with smart <strong>Labels</strong> & <strong>Preferred Phone</strong> styling.
                         </div>
                       </button>
                     </div>
