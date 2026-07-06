@@ -173,15 +173,10 @@ function isRef(value: unknown): value is Ref {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const adminToken = typeof window !== "undefined"
-    ? window.localStorage.getItem("temple_admin_token") || ""
-    : "";
-
   const response = await fetch(path, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(adminToken ? { "X-Admin-Token": adminToken } : {}),
       ...init?.headers,
     },
   });

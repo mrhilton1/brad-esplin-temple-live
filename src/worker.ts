@@ -11,7 +11,6 @@ interface Env {
   GUIDE_SIGNUP_TOKEN?: string;
   SIGNUP_TOKEN?: string;
   PUBLIC_SIGNUP_TOKEN?: string;
-  ADMIN_ACCESS_TOKEN?: string;
 }
 
 const jsonHeaders = {
@@ -69,21 +68,8 @@ async function handleRequest(request: Request, env: Env, url: URL): Promise<Resp
       return comingSoonPage();
     }
 
-    if (url.pathname.startsWith("/admin-login/")) {
-      return handleAdminLogin(request, env, url);
-    }
-
     if (isScheduleHost(url) && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/public/")) {
       return json({ error: "Not found." }, 404);
-    }
-
-    const requiresAdmin = !isCoordHost(url) && !isScheduleHost(url);
-    if (requiresAdmin && !isPublicRoute(url) && !isAuthorizedAdmin(request, env)) {
-      if (url.pathname.startsWith("/api/")) {
-        return json({ error: "Admin access required." }, 401);
-      }
-
-      return adminLockedPage();
     }
 
     if (url.pathname === "/api/extract") {
@@ -149,10 +135,6 @@ function isScheduleHost(url: URL): boolean {
   return getHost(url) === SCHEDULE_HOST;
 }
 
-function isCoordHost(url: URL): boolean {
-  return getHost(url) === COORD_HOST;
-}
-
 function isApexHost(url: URL): boolean {
   return APEX_HOSTS.has(getHost(url));
 }
@@ -174,106 +156,6 @@ function addNoIndexHeaders(response: Response, url: URL): Response {
     status: response.status,
     statusText: response.statusText,
     headers,
-  });
-}
-
-function isPublicRoute(url: URL): boolean {
-  return url.pathname.startsWith("/guide-signup") ||
-    url.pathname.startsWith("/api/public/") ||
-    url.pathname.startsWith("/assets/") ||
-    url.pathname === "/favicon.ico" ||
-    url.pathname === "/robots.txt";
-}
-
-function handleAdminLogin(_request: Request, env: Env, url: URL): Response {
-  const expectedToken = env.ADMIN_ACCESS_TOKEN;
-  const providedToken = decodeURIComponent(url.pathname.replace(/^\/admin-login\//, "").split("/")[0] || "");
-
-  if (!expectedToken || providedToken !== expectedToken) {
-    return adminLockedPage();
-  }
-
-  return new Response(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Opening CRM</title>
-    <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8fafc; color: #0f172a; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      main { width: min(420px, calc(100vw - 32px)); border: 1px solid #e2e8f0; border-radius: 18px; background: white; padding: 28px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); }
-      h1 { margin: 0 0 10px; font-size: 24px; }
-      p { margin: 0; color: #475569; line-height: 1.55; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Opening CRM</h1>
-      <p>Refreshing your secure session...</p>
-    </main>
-    <script>
-      localStorage.setItem("temple_admin_token", ${JSON.stringify(expectedToken)});
-      setTimeout(() => location.replace("/contacts?auth=" + Date.now()), 50);
-    </script>
-  </body>
-</html>`, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Set-Cookie": [
-        `temple_admin=${encodeURIComponent(expectedToken)}`,
-        "Path=/",
-        "HttpOnly",
-        "Secure",
-        "SameSite=Lax",
-        "Max-Age=2592000",
-      ].join("; "),
-      "Cache-Control": "no-store",
-      "Clear-Site-Data": '"cache"',
-    },
-  });
-}
-
-function isAuthorizedAdmin(request: Request, env: Env): boolean {
-  const expectedToken = env.ADMIN_ACCESS_TOKEN;
-  if (!expectedToken) return false;
-  const headerToken = request.headers.get("X-Admin-Token") || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || "";
-  if (headerToken === expectedToken) return true;
-
-  const cookieHeader = request.headers.get("Cookie") || "";
-  const cookies = Object.fromEntries(cookieHeader.split(";").map(part => {
-    const [key, ...rest] = part.trim().split("=");
-    return [key, decodeURIComponent(rest.join("=") || "")];
-  }));
-  return cookies.temple_admin === expectedToken;
-}
-
-function adminLockedPage(): Response {
-  return new Response(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Access Required</title>
-    <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f8fafc; color: #0f172a; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      main { width: min(420px, calc(100vw - 32px)); border: 1px solid #e2e8f0; border-radius: 18px; background: white; padding: 28px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); }
-      h1 { margin: 0 0 10px; font-size: 24px; }
-      p { margin: 0; color: #475569; line-height: 1.55; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Access Required</h1>
-      <p>This CRM is private. Use the admin login link to continue.</p>
-    </main>
-  </body>
-</html>`, {
-    status: 404,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
   });
 }
 
