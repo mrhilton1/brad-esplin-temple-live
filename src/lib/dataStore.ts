@@ -35,6 +35,10 @@ type QuerySnapshot = {
 
 export const db = {};
 
+const DATA_REFRESH_EVENT = "temple-data-refresh";
+const FOCUS_REFRESH_STALE_MS = 60_000;
+const LOCAL_WRITE_REFRESH_DEBOUNCE_MS = 750;
+
 export function collection(_db: unknown, collectionName: CollectionName): Ref {
   return { collectionName };
 }
@@ -97,6 +101,7 @@ export async function setDoc(ref: Ref, data: Record<string, any>, options?: { me
     method: options?.merge ? "PATCH" : "PUT",
     body: JSON.stringify(data),
   });
+  notifyCollectionChanged(ref.collectionName);
 }
 
 export async function updateDoc(ref: Ref, data: Record<string, any>): Promise<void> {
@@ -108,6 +113,7 @@ export async function updateDoc(ref: Ref, data: Record<string, any>): Promise<vo
     method: "PATCH",
     body: JSON.stringify(data),
   });
+  notifyCollectionChanged(ref.collectionName);
 }
 
 export async function deleteDoc(ref: Ref): Promise<void> {
@@ -118,6 +124,7 @@ export async function deleteDoc(ref: Ref): Promise<void> {
   await request(`/api/db/${ref.collectionName}/${encodeURIComponent(ref.id)}`, {
     method: "DELETE",
   });
+  notifyCollectionChanged(ref.collectionName);
 }
 
 export function onSnapshot(
@@ -126,10 +133,13 @@ export function onSnapshot(
   error?: (err: unknown) => void,
 ): () => void {
   let cancelled = false;
+  let debounceId: number | undefined;
+  let lastLoadedAt = 0;
 
   const load = async () => {
     try {
       const snapshot = await getDocs(ref);
+      lastLoadedAt = Date.now();
       if (!cancelled) {
         next(snapshot);
       }
@@ -140,13 +150,43 @@ export function onSnapshot(
     }
   };
 
+  const scheduleLoad = () => {
+    if (debounceId) window.clearTimeout(debounceId);
+    debounceId = window.setTimeout(load, LOCAL_WRITE_REFRESH_DEBOUNCE_MS);
+  };
+
+  const handleLocalRefresh = (event: Event) => {
+    const changedCollection = (event as CustomEvent<{ collectionName?: CollectionName }>).detail?.collectionName;
+    if (!changedCollection || changedCollection === ref.collectionName) {
+      scheduleLoad();
+    }
+  };
+
+  const handleFocusRefresh = () => {
+    if (document.hidden) return;
+    if (Date.now() - lastLoadedAt > FOCUS_REFRESH_STALE_MS) {
+      scheduleLoad();
+    }
+  };
+
   load();
-  const interval = window.setInterval(load, 5000);
+  window.addEventListener(DATA_REFRESH_EVENT, handleLocalRefresh);
+  window.addEventListener("focus", handleFocusRefresh);
+  document.addEventListener("visibilitychange", handleFocusRefresh);
 
   return () => {
     cancelled = true;
-    window.clearInterval(interval);
+    if (debounceId) window.clearTimeout(debounceId);
+    window.removeEventListener(DATA_REFRESH_EVENT, handleLocalRefresh);
+    window.removeEventListener("focus", handleFocusRefresh);
+    document.removeEventListener("visibilitychange", handleFocusRefresh);
   };
+}
+
+function notifyCollectionChanged(collectionName: CollectionName): void {
+  window.dispatchEvent(new CustomEvent(DATA_REFRESH_EVENT, {
+    detail: { collectionName },
+  }));
 }
 
 function makeQuerySnapshot(rows: Record<string, any>[]): QuerySnapshot {
