@@ -84,6 +84,34 @@ const slotHasOpenRole = (slot: SignupSlot) => {
   return roleEntries(slot).some(({ status }) => !status.filled);
 };
 
+const startOfToday = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const findInitialSignupDate = (loadedSlots: SignupSlot[]) => {
+  const today = startOfToday();
+  const currentMonthKey = getMonthKey(today);
+  const datedOpenSlots = loadedSlots
+    .map(slot => ({ slot, parsed: parseDateString(slot.date) }))
+    .filter((entry): entry is { slot: SignupSlot; parsed: Date } => {
+      if (!entry.parsed || !slotHasOpenRole(entry.slot)) return false;
+      const date = new Date(entry.parsed);
+      date.setHours(0, 0, 0, 0);
+      return date >= today;
+    })
+    .sort((a, b) => a.parsed.getTime() - b.parsed.getTime());
+
+  const currentMonthOpenSlot = datedOpenSlots.find(({ parsed }) => getMonthKey(parsed) === currentMonthKey);
+  if (currentMonthOpenSlot) return currentMonthOpenSlot.slot.date;
+
+  const nextOpenSlot = datedOpenSlots.find(({ parsed }) => getMonthKey(parsed) !== currentMonthKey);
+  if (nextOpenSlot) return nextOpenSlot.slot.date;
+
+  return loadedSlots[0]?.date || "";
+};
+
 export default function GuideSignupPage() {
   const [slots, setSlots] = useState<SignupSlot[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,9 +139,9 @@ export default function GuideSignupPage() {
         }
         const loadedSlots = Array.isArray(payload?.slots) ? payload.slots : [];
         setSlots(loadedSlots);
-        const firstDate = loadedSlots[0]?.date || "";
-        setSelectedDate(firstDate);
-        const parsed = parseDateString(firstDate);
+        const initialDate = findInitialSignupDate(loadedSlots);
+        setSelectedDate(initialDate);
+        const parsed = parseDateString(initialDate);
         if (parsed) setVisibleMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
       } catch (err: any) {
         setError(err?.message || "Unable to load available guide assignments.");
