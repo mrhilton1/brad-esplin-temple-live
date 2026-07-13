@@ -97,12 +97,63 @@ const slugifyKeyPart = (value: string): string => {
     .toLowerCase();
 };
 
+const canonicalDateKey = (value: string): string => {
+  const parsed = parseDateString(value);
+  return parsed ? formatDateForInput(parsed.toISOString()) : slugifyKeyPart(value);
+};
+
+const canonicalTimeKey = (value: string): string => {
+  const match = String(value || "").trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!match) return slugifyKeyPart(value);
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2] || "0", 10);
+  const period = match[3].toUpperCase();
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  return `${String(hours).padStart(2, "0")}${String(minutes).padStart(2, "0")}`;
+};
+
+const canonicalRoomKey = (value: string): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  const roomMatch = normalized.match(/\broom\s*(\d+)\b/);
+  return roomMatch ? `room_${roomMatch[1]}` : slugifyKeyPart(normalized);
+};
+
 const eventSlotKey = (event: Record<string, any>): string => {
   return [
-    slugifyKeyPart(event.date || ""),
-    slugifyKeyPart(event.time || ""),
-    slugifyKeyPart(event.room || ""),
+    canonicalDateKey(event.date || ""),
+    canonicalTimeKey(event.time || ""),
+    canonicalRoomKey(event.room || ""),
   ].join("|");
+};
+
+const eventDateTimeKey = (event: Record<string, any>): string => {
+  return [
+    canonicalDateKey(event.date || ""),
+    canonicalTimeKey(event.time || ""),
+  ].join("|");
+};
+
+const chooseBestEventMatch = (candidates: Record<string, any>[] = [], incomingEvent: Record<string, any>) => {
+  if (candidates.length === 0) return null;
+  const incomingGuests = normalizeEventText(incomingEvent.guests || "");
+  const incomingRoom = canonicalRoomKey(incomingEvent.room || "");
+
+  return [...candidates].sort((a, b) => {
+    const aActive = a.status === "deleted" ? 0 : 1;
+    const bActive = b.status === "deleted" ? 0 : 1;
+    if (aActive !== bActive) return bActive - aActive;
+
+    const aGuests = normalizeEventText(a.guests || "") === incomingGuests ? 1 : 0;
+    const bGuests = normalizeEventText(b.guests || "") === incomingGuests ? 1 : 0;
+    if (aGuests !== bGuests) return bGuests - aGuests;
+
+    const aRoom = canonicalRoomKey(a.room || "") === incomingRoom ? 1 : 0;
+    const bRoom = canonicalRoomKey(b.room || "") === incomingRoom ? 1 : 0;
+    if (aRoom !== bRoom) return bRoom - aRoom;
+
+    return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+  })[0];
 };
 
 const getEventDecisionTitle = (event: Record<string, any>, fallback = "Event") => {
@@ -130,6 +181,9 @@ const normalizeEventText = (value: string): string => {
 
 const getChangedEventFields = (existingEvent: Record<string, any>, incomingEvent: Record<string, any>) => {
   return (["date", "time", "room", "type", "guests"] as const).filter(field => {
+    if (field === "room" && canonicalRoomKey(existingEvent.room || "") === canonicalRoomKey(incomingEvent.room || "")) {
+      return false;
+    }
     return normalizeEventText(existingEvent[field] || "") !== normalizeEventText(incomingEvent[field] || "");
   });
 };
@@ -210,16 +264,17 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
 
       // Fetch existing events if template is event_schedule
       const existingEvents: Record<string, any> = {};
-      const existingEventsBySlot: Record<string, any> = {};
+      const existingEventsBySlot: Record<string, any[]> = {};
+      const existingEventsByDateTime: Record<string, any[]> = {};
       if (sheetPreset === "event_schedule") {
         const eventsSnapshot = await getDocs(collection(db, "events"));
         eventsSnapshot.forEach(docSnap => {
           const eventData = { id: docSnap.id, ...docSnap.data() };
           existingEvents[docSnap.id] = eventData;
           const slotKey = eventSlotKey(eventData);
-          if (!existingEventsBySlot[slotKey]) {
-            existingEventsBySlot[slotKey] = eventData;
-          }
+          const dateTimeKey = eventDateTimeKey(eventData);
+          existingEventsBySlot[slotKey] = [...(existingEventsBySlot[slotKey] || []), eventData];
+          existingEventsByDateTime[dateTimeKey] = [...(existingEventsByDateTime[dateTimeKey] || []), eventData];
         });
       }
 
@@ -307,8 +362,19 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             }
           }
 
-          const slotKey = eventSlotKey({ date: dateVal, time: timeVal, room: roomVal });
-          const existingEvent = existingEventsBySlot[slotKey];
+          const incomingEvent = {
+            date: dateVal,
+            time: timeVal,
+            room: roomVal,
+            type: typeVal,
+            guests: guestsVal,
+          };
+          const slotKey = eventSlotKey(incomingEvent);
+          const dateTimeKey = eventDateTimeKey(incomingEvent);
+          const exactCandidates = existingEventsBySlot[slotKey] || [];
+          const dateTimeCandidates = !canonicalRoomKey(roomVal) ? (existingEventsByDateTime[dateTimeKey] || []) : [];
+          const existingEvent = chooseBestEventMatch(exactCandidates, incomingEvent) ||
+            (dateTimeCandidates.length === 1 ? dateTimeCandidates[0] : null);
           const targetEventId = existingEvent?.id || crypto.randomUUID();
           allIncomingDocIds.add(targetEventId);
           const eventRef = doc(db, "events", targetEventId);
@@ -328,15 +394,23 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
-            savedCount++;
-          } else {
-            const incomingEvent = {
+            const newEvent = {
+              id: targetEventId,
               date: dateVal,
               time: timeVal,
               room: roomVal,
               type: typeVal,
               guests: guestsVal,
+              assignedLsgId: "",
+              assignedGroomLsgId: "",
+              assignedCsgId: "",
+              status: "unassigned",
             };
+            existingEvents[targetEventId] = newEvent;
+            existingEventsBySlot[slotKey] = [...(existingEventsBySlot[slotKey] || []), newEvent];
+            existingEventsByDateTime[dateTimeKey] = [...(existingEventsByDateTime[dateTimeKey] || []), newEvent];
+            savedCount++;
+          } else {
             const changedFields = getChangedEventFields(existingEvent, incomingEvent);
 
             if (changedFields.length > 0) {
