@@ -395,7 +395,7 @@ export default function EventMatcher() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("upcoming");
   const [dateRangeStart, setDateRangeStart] = useState<Date | null>(null);
   const [dateRangeEnd, setDateRangeEnd] = useState<Date | null>(null);
   const [dateQuickFilter, setDateQuickFilter] = useState<"weekends" | null>("weekends");
@@ -1613,12 +1613,12 @@ export default function EventMatcher() {
                   <div className="event-print-section">
                     <h3>LSG Arrival: <strong>{lsgArrival || "--"}</strong></h3>
                     <div className="event-print-worker-row">
-                      <span>Bride:</span>
+                      <span>Bride Guide:</span>
                       <strong>{getContactNameById(event.assignedLsgId)}</strong>
                       <em>{event.lsgConfirmed ? "Confirmed" : "Not confirmed"}</em>
                     </div>
                     <div className="event-print-worker-row">
-                      <span>Groom:</span>
+                      <span>Groom Guide:</span>
                       <strong>{getContactNameById(event.assignedGroomLsgId)}</strong>
                       <em>{event.groomLsgConfirmed ? "Confirmed" : "Not confirmed"}</em>
                     </div>
@@ -1627,7 +1627,7 @@ export default function EventMatcher() {
                   <div className="event-print-section">
                     <h3>CSG Arrival: <strong>{csgArrival || "--"}</strong></h3>
                     <div className="event-print-worker-row">
-                      <span>Worker:</span>
+                      <span>Company Guide:</span>
                       <strong>{getContactNameById(event.assignedCsgId)}</strong>
                       <em>{event.csgConfirmed ? "Confirmed" : "Not confirmed"}</em>
                     </div>
@@ -2141,7 +2141,7 @@ export default function EventMatcher() {
                 </h3>
               )}
               <div
-                style={{ zIndex: 100 - index }} // Dynamic z-index placement! Ensures dropdown of upper record overlays bottom records cleanly
+                style={{ zIndex: filteredEvents.length - index }} // Keep every card above the page while upper dropdowns still overlay lower records.
                 className={`glass-card rounded-xl border ${borderClass} shadow-md transition-all flex flex-col relative`}
               >
                 {/* 1. Full-width Wireframe Header Area */}
@@ -2342,7 +2342,7 @@ export default function EventMatcher() {
                             <div className="pl-3 space-y-1.5">
                               {/* Bride Row */}
                               <div className="flex flex-wrap items-center gap-2 w-full">
-                                <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Bride:</span>
+                                <span className="w-[92px] sm:w-[104px] shrink-0 text-xs font-bold text-slate-400 font-mono">Bride Guide:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedLsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
@@ -2394,7 +2394,7 @@ export default function EventMatcher() {
 
                               {/* Groom Row */}
                               <div className="flex flex-wrap items-center gap-2 w-full">
-                                <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Groom:</span>
+                                <span className="w-[92px] sm:w-[104px] shrink-0 text-xs font-bold text-slate-400 font-mono">Groom Guide:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedGroomLsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
@@ -2461,7 +2461,7 @@ export default function EventMatcher() {
                             <div className="pl-3 space-y-1.5">
                               {/* Worker Row */}
                               <div className="flex flex-wrap items-center gap-2 w-full">
-                                <span className="w-[50px] sm:w-[60px] shrink-0 text-xs font-bold text-slate-400 font-mono">Worker:</span>
+                                <span className="w-[92px] sm:w-[104px] shrink-0 text-xs font-bold text-slate-400 font-mono">Company Guide:</span>
                                 <SearchableWorkerSelect
                                   value={event.assignedCsgId || ""}
                                   onChange={(val) => handleAssignWorker(event.id, "csg", val)}
