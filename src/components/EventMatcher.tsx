@@ -292,10 +292,40 @@ interface SearchableWorkerSelectProps {
 function SearchableWorkerSelect({ value, onChange, workers, allWorkers = workers, placeholder, disabled, compact, selectedValueClassName }: SearchableWorkerSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const instanceIdRef = useRef(`worker-select-${Math.random().toString(36).slice(2)}`);
   
   const selectedWorker = workers.find(w => w.id === value) || allWorkers.find(w => w.id === value);
   const displayValue = selectedWorker ? selectedWorker["Worker Name"] : "";
   const selectedTextClass = !isOpen && value && selectedValueClassName ? selectedValueClassName : "text-white";
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleCloseOthers = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string }>).detail;
+      if (detail?.id !== instanceIdRef.current) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("worker-select-open", handleCloseOthers);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("worker-select-open", handleCloseOthers);
+    };
+  }, []);
+
+  const openDropdown = () => {
+    window.dispatchEvent(new CustomEvent("worker-select-open", { detail: { id: instanceIdRef.current } }));
+    setIsOpen(true);
+  };
 
   // Filter workers dynamically based on query
   const filteredWorkers = workers.filter(w => {
@@ -305,7 +335,7 @@ function SearchableWorkerSelect({ value, onChange, workers, allWorkers = workers
   });
 
   return (
-    <div className="relative z-30 inline-block text-left">
+    <div ref={rootRef} className="relative z-30 inline-block text-left">
       <div className="flex items-center gap-1">
         <div className="relative flex items-center">
           <input
@@ -314,11 +344,11 @@ function SearchableWorkerSelect({ value, onChange, workers, allWorkers = workers
             value={isOpen ? searchQuery : displayValue}
             onChange={(e) => {
               setSearchQuery(e.target.value);
-              if (!isOpen) setIsOpen(true);
+              if (!isOpen) openDropdown();
             }}
             onFocus={() => {
               setSearchQuery("");
-              setIsOpen(true);
+              openDropdown();
             }}
             placeholder={placeholder}
             className={`px-2.5 py-1 text-xs ${selectedTextClass} bg-slate-900/80 border border-white/10 rounded-md focus:outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 pr-8 truncate disabled:opacity-40 disabled:cursor-not-allowed transition-all font-mono ${
@@ -349,9 +379,6 @@ function SearchableWorkerSelect({ value, onChange, workers, allWorkers = workers
 
       {isOpen && (
         <>
-          {/* Backdrop click dismiss */}
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          
           <div className={`absolute left-0 mt-1 ${compact ? "w-[180px]" : "w-[200px]"} max-h-[180px] overflow-y-auto bg-slate-950 border border-white/15 rounded-md shadow-2xl z-[70] py-1 scrollbar-thin`}>
             {filteredWorkers.length === 0 ? (
               <div className="px-3 py-2 text-[11px] text-slate-500 italic">No workers found</div>
