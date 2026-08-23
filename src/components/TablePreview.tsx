@@ -210,6 +210,15 @@ const isDateInPast = (dateStr: string): boolean => {
   return d < comparisonDate;
 };
 
+const isFutureOrToday = (dateStr: string): boolean => {
+  const d = parseDateString(dateStr);
+  if (!d) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  return d >= today;
+};
+
 interface TablePreviewProps {
   data: ExtractedTableData;
   onDataUpdated: (newData: ExtractedTableData) => void;
@@ -412,6 +421,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
             savedCount++;
           } else {
             const changedFields = getChangedEventFields(existingEvent, incomingEvent);
+            const shouldClearCompleted = !!existingEvent.completed && isFutureOrToday(dateVal);
 
             if (changedFields.length > 0) {
               const conflictId = `event_conflict_${targetEventId}_details`;
@@ -437,6 +447,15 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               const restoredStatus = existingEvent.assignedLsgId ? "assigned" : "unassigned";
               await setDoc(eventRef, {
                 status: restoredStatus,
+                updatedAt: serverTimestamp()
+              }, { merge: true });
+              savedCount++;
+            }
+
+            if (shouldClearCompleted) {
+              await setDoc(eventRef, {
+                completed: false,
+                completedAt: null,
                 updatedAt: serverTimestamp()
               }, { merge: true });
               savedCount++;
