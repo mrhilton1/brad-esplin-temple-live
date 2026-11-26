@@ -1639,7 +1639,7 @@ export default function EventMatcher() {
                   </div>
 
                   <div className="event-print-section">
-                    <h3>LSG Arrival: <strong>{lsgArrival || "--"}</strong></h3>
+                    <h3>BGG Arrival: <strong>{lsgArrival || "--"}</strong></h3>
                     <div className="event-print-worker-row">
                       <span>Bride Guide:</span>
                       <strong>{getContactNameById(event.assignedLsgId)}</strong>
@@ -1653,7 +1653,7 @@ export default function EventMatcher() {
                   </div>
 
                   <div className="event-print-section">
-                    <h3>CSG Arrival: <strong>{csgArrival || "--"}</strong></h3>
+                    <h3>CG Arrival: <strong>{csgArrival || "--"}</strong></h3>
                     <div className="event-print-worker-row">
                       <span>Company Guide:</span>
                       <strong>{getContactNameById(event.assignedCsgId)}</strong>
@@ -2262,7 +2262,7 @@ export default function EventMatcher() {
                         onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
                         workers={lsgWorkers}
                         allWorkers={contacts}
-                        placeholder="Bride LSG..."
+                        placeholder="Bride Guide"
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.lsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
@@ -2272,7 +2272,7 @@ export default function EventMatcher() {
                         onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
                         workers={lsgWorkers}
                         allWorkers={contacts}
-                        placeholder="Groom LSG..."
+                        placeholder="Groom Guide"
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.groomLsgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
@@ -2282,7 +2282,7 @@ export default function EventMatcher() {
                         onChange={(val) => handleAssignWorker(event.id, "csg", val)}
                         workers={csgWorkers}
                         allWorkers={contacts}
-                        placeholder="CSG..."
+                        placeholder="Company Guide"
                         disabled={event.status === "deleted" || event.completed}
                         selectedValueClassName={!event.csgConfirmed ? "text-rose-300 font-extrabold" : undefined}
                         compact
@@ -2361,13 +2361,13 @@ export default function EventMatcher() {
 
                         {/* Workers list grouped by arrivals exactly like the wireframe */}
                         <div className="space-y-3">
-                          {/* Section 1: LSG Arrival Section */}
+                          {/* Section 1: BGG Arrival Section */}
                           <div className="space-y-1.5">
-                            {/* Header: LSG Arrival */}
+                            {/* Header: BGG Arrival */}
                             <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center">
                               <div className="text-xs font-bold font-mono flex items-center gap-2 text-slate-200">
                                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                                <span>LSG Arrival:</span>
+                                <span>BGG Arrival:</span>
                                 <span className="text-indigo-300">{lsgArrival || "—"}</span>
                               </div>
                             </div>
@@ -2382,7 +2382,7 @@ export default function EventMatcher() {
                                   onChange={(val) => handleAssignWorker(event.id, "lsg", val)}
                                   workers={lsgWorkers}
                                   allWorkers={contacts}
-                                  placeholder="Select Bride LSG..."
+                                  placeholder="Bride Guide"
                                   disabled={event.status === "deleted" || event.completed}
                                 />
                                 {lsgCovered ? (
@@ -2434,7 +2434,7 @@ export default function EventMatcher() {
                                   onChange={(val) => handleAssignWorker(event.id, "groom_lsg", val)}
                                   workers={lsgWorkers}
                                   allWorkers={contacts}
-                                  placeholder="Select Groom LSG..."
+                                  placeholder="Groom Guide"
                                   disabled={event.status === "deleted" || event.completed}
                                 />
                                 {groomLsgCovered ? (
@@ -2480,13 +2480,13 @@ export default function EventMatcher() {
                             </div>
                           </div>
 
-                          {/* Section 2: CSG Arrival Section */}
+                          {/* Section 2: CG Arrival Section */}
                           <div className="space-y-1.5 pt-1">
-                            {/* Header: CSG Arrival */}
+                            {/* Header: CG Arrival */}
                             <div className="bg-white/3 border border-white/5 rounded-lg px-2.5 py-1 flex items-center">
                               <div className="text-xs font-bold font-mono flex items-center gap-2 text-slate-200">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                <span>CSG Arrival:</span>
+                                <span>CG Arrival:</span>
                                 <span className="text-emerald-300">{csgArrival || "—"}</span>
                               </div>
                             </div>
@@ -2501,7 +2501,7 @@ export default function EventMatcher() {
                                   onChange={(val) => handleAssignWorker(event.id, "csg", val)}
                                   workers={csgWorkers}
                                   allWorkers={contacts}
-                                  placeholder="Select CSG Worker..."
+                                  placeholder="Company Guide"
                                   disabled={event.status === "deleted" || event.completed}
                                 />
                                 {csgCovered ? (
@@ -2766,8 +2766,8 @@ export default function EventMatcher() {
                               { placeholder: "{title}", label: "Sealing Title" },
                               { placeholder: "{date}", label: "Date" },
                               { placeholder: "{time}", label: "Time" },
-                              { placeholder: "{lsg_arrival}", label: "LSG Arrival" },
-                              { placeholder: "{csg_arrival}", label: "CSG Arrival" },
+                              { placeholder: "{lsg_arrival}", label: "BGG Arrival" },
+                              { placeholder: "{csg_arrival}", label: "CG Arrival" },
                               { placeholder: "{bride_and_groom_arrival}", label: "Bride & Groom Arrival" },
                               { placeholder: "{lsg_bride_first}", label: "Bride LSG First" },
                               { placeholder: "{lsg_groom_first}", label: "Groom LSG First" },
