@@ -351,13 +351,16 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
           const timeIdx = columns.findIndex(col => col.toLowerCase().includes("time"));
           const roomIdx = columns.findIndex(col => col.toLowerCase().includes("room"));
           const typeIdx = columns.findIndex(col => col.toLowerCase().includes("type"));
-          const guestsIdx = columns.findIndex(col => col.toLowerCase().includes("guest") || col.toLowerCase().includes("names"));
+          const guestsIdx = columns.findIndex(col => !col.toLowerCase().includes("sealer") && (col.toLowerCase().includes("guest") || col.toLowerCase().includes("names")));
+          const sealerIdx = columns.findIndex(col => col.trim().toLowerCase() === "sealer");
 
           const dateVal = dateIdx !== -1 ? (row[dateIdx] || "").trim() : "";
           const timeVal = timeIdx !== -1 ? (row[timeIdx] || "").trim() : "";
           const roomVal = roomIdx !== -1 ? (row[roomIdx] || "").trim() : "";
           const typeVal = typeIdx !== -1 ? (row[typeIdx] || "").trim() : "";
           const guestsVal = guestsIdx !== -1 ? (row[guestsIdx] || "").trim() : "";
+
+          const sealerVal = sealerIdx !== -1 ? (row[sealerIdx] || "").trim() : "";
 
           if (!guestsVal) continue;
           const parsedIncomingDate = parseDateString(dateVal);
@@ -396,6 +399,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               room: roomVal,
               type: typeVal,
               guests: guestsVal,
+              sealer: sealerVal,
               assignedLsgId: "",
               assignedGroomLsgId: "",
               assignedCsgId: "",
@@ -410,6 +414,7 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               room: roomVal,
               type: typeVal,
               guests: guestsVal,
+              sealer: sealerVal,
               assignedLsgId: "",
               assignedGroomLsgId: "",
               assignedCsgId: "",
@@ -452,10 +457,11 @@ export default function TablePreview({ data, onDataUpdated, onReset, sheetPreset
               savedCount++;
             }
 
-            if (shouldClearCompleted) {
+            const shouldUpdateSealer = !!sealerVal && sealerVal !== existingEvent.sealer;
+            if (shouldClearCompleted || shouldUpdateSealer) {
               await setDoc(eventRef, {
-                completed: false,
-                completedAt: null,
+                ...(shouldUpdateSealer ? { sealer: sealerVal } : {}),
+                ...(shouldClearCompleted ? { completed: false, completedAt: null } : {}),
                 updatedAt: serverTimestamp()
               }, { merge: true });
               savedCount++;

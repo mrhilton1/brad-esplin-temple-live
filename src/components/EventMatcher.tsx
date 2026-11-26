@@ -252,6 +252,7 @@ interface EventRecord {
   room: string;
   type: string;
   guests: string;
+  sealer?: string;
   assignedLsgId: string;
   assignedGroomLsgId?: string;
   assignedCsgId: string;
@@ -2202,6 +2203,12 @@ export default function EventMatcher() {
                       <Clock className="w-3 h-3 text-indigo-400" />
                       <span>{event.time}</span>
                     </div>
+
+                    {event.sealer && (
+                      <span className="font-sans font-medium text-slate-200">
+                        <span className="text-slate-400">Sealer:</span> {event.sealer}
+                      </span>
+                    )}
 
                     {/* Texting Icon to the right of the Time */}
                     <button
